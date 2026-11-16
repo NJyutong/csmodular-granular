@@ -8,12 +8,6 @@
   <a href="csound/GrainCore.txt"><img src="https://img.shields.io/badge/DSP-Csound_Granular-7C3AED?style=flat-square" alt="Csound granular DSP"></a>
 </p>
 
-| Информация | Ссылка |
-| --- | --- |
-| Основная система | [CsModular](https://github.com/gleb812/csmodular) |
-| Лицензия | [MIT — Zhang Shengwei](LICENSE) |
-| DSP-ядро | [Csound GrainCore](csound/GrainCore.txt) |
-
 Оригинальный гранулярный синтез для CsModular с возможностью соединения модулей. Планирование гранул, воспроизведение, интерполяция, оконные функции, случайное состояние и смешивание перекрывающихся голосов полностью выполняются в Csound. Модули используют кабельную шину Zak хоста и подключаются к слоям Voice или FX.
 
 ## Рабочий процесс панели

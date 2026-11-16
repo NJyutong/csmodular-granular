@@ -8,12 +8,6 @@
   <a href="csound/GrainCore.txt"><img src="https://img.shields.io/badge/DSP-Csound_Granular-7C3AED?style=flat-square" alt="Csound 颗粒 DSP"></a>
 </p>
 
-| 项目信息 | 链接 |
-| --- | --- |
-| 宿主系统 | [CsModular](https://github.com/gleb812/csmodular) |
-| 许可证 | [MIT — Zhang Shengwei](LICENSE) |
-| DSP 核心 | [Csound GrainCore](csound/GrainCore.txt) |
-
 为 CsModular 提供原创、可连接的颗粒合成。颗粒调度、播放、插值、窗函数、随机状态和重叠混音全部由 Csound 实现。模块通过宿主 Zak 电缆总线连接到 Voice 或 FX 层。
 
 ## 面板工作流

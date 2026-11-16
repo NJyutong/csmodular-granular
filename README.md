@@ -8,12 +8,6 @@
   <a href="csound/GrainCore.txt"><img src="https://img.shields.io/badge/DSP-Csound_Granular-7C3AED?style=flat-square" alt="Csound granular DSP"></a>
 </p>
 
-| Project information | Link |
-| --- | --- |
-| Host system | [CsModular](https://github.com/gleb812/csmodular) |
-| License | [MIT — Zhang Shengwei](LICENSE) |
-| DSP core | [Csound GrainCore](csound/GrainCore.txt) |
-
 Original, patchable granular synthesis for CsModular. Grain scheduling, playback, interpolation, windows, random state and overlap mixing run entirely in Csound. The modules route through the host's Zak cable buses and connect to Voice or FX layers.
 
 ## Panel workflow
