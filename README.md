@@ -1,13 +1,14 @@
 # CsModular Granular Library
 
-[English](README.md) · [简体中文](README.zh-CN.md) · [Русский](README.ru.md)
+**English** · [简体中文](README.zh-CN.md) · [Русский](README.ru.md)
+
+![Host repository](https://img.shields.io/badge/Host-gleb812/csmodular-blue) ![License: MIT](https://img.shields.io/badge/License-MIT-green) ![Csound](https://img.shields.io/badge/Csound-granular--engine-orange)
 
 Panels follow the order you work in: **1 source/tone → 2 shape & randomness → 3 stereo output → Advanced**. Osc starts with Waveform (0 sine, 1 triangle, 2 saw, 3 square), Pitch and Grains/s (pitch 0 = 220 Hz, A3); Sample starts with the file slot, position and Scan speed; Freeze starts with Record/Freeze, lookback and lookback jitter, and keeps Dry/wet next to Level. Controls that rarely change the result sit last: Phase and Hold position on Osc (neither is audible on a periodic wave; they exist so older patches load), Hold position and the dry-signal mix on Sample, centre Pan on Freeze. Leave them at their defaults when starting.
 
 ## First use
 
 Click **Start here** at the top right, then **Load starter patch**. It loads Grain Osc → Outs2, with confirmation before replacing your patch. Save your work first. Lower speaker volume and press ▶ in the bottom bar. The guide covers cables, controls, saving and silence troubleshooting. Each panel now identifies its source. Grain window is a named Hann/Triangle selector; live Freeze offers Record/Freeze, while sample/osc offer Follow/Hold position. Parameter IDs and DSP routing remain compatible.
-
 
 The interface follows browser/system language preferences (Chinese, Russian, English fallback). Reload after changing language.
 
@@ -19,21 +20,21 @@ run in Csound. There is no built-in granular synthesizer in the DSP path.
 
 The granular plugin is maintained in this standalone repository; the CsModular host application is maintained separately.
 
-- `csound/GrainCore.txt`: the single shared DSP implementation.
-- `modules/GrainFreeze`, `GrainSample`, `GrainOsc`: matching `.js` UI / `.txt` UDO pairs.
-- `scripts/build-modules.mjs`: regenerates the plain module objects and thin UDO wrappers.
-- `integration/csmodular.patch`: required host integration, against the supplied 0.1.5 sources.
-- `scripts/install.mjs`: checks/applies that patch and copies the library and example.
-- `examples/granular-demo.json`: ready-to-load patch.
-- `tests/`: real WASM rendering, application and interface checks.
-- `SOURCES.md`: provenance, license decisions and exact inspected file hashes.
+* `csound/GrainCore.txt`: the single shared DSP implementation.
+* `modules/GrainFreeze`, `GrainSample`, `GrainOsc`: matching `.js` UI / `.txt` UDO pairs.
+* `scripts/build-modules.mjs`: regenerates the plain module objects and thin UDO wrappers.
+* `integration/csmodular.patch`: required host integration, against the supplied 0.1.5 sources.
+* `scripts/install.mjs`: checks/applies that patch and copies the library and example.
+* `examples/granular-demo.json`: ready-to-load patch.
+* `tests/`: real WASM rendering, application and interface checks.
+* `SOURCES.md`: provenance, license decisions and exact inspected file hashes.
 
 The integration is already installed in the supplied host. After editing this
 plugin, synchronize it with:
 
 ```powershell
 node scripts/build-modules.mjs
-node scripts/install.mjs <path-to-csmodular-main>
+node scripts/install.mjs
 ```
 
 The installer is idempotent and refuses incompatible integration changes.
@@ -64,7 +65,7 @@ The small jack beside each of the first twelve knobs is additive, control-rate C
 Audio cables are converted by the host before entering these static control jacks.
 
 | Control | Knob range / meaning | Added by CV = 1 |
-|---|---|---|
+| --- | --- | --- |
 | Density | 0–200 grains/s; 0 lets existing voices finish | 100 grains/s |
 | Size | 2–500 ms; live grains may shorten for read/write safety | 250 ms |
 | Position | 0–127 maps to 0–1; live: recent → older safe history (about 4 s at 48 kHz); Osc: start phase of each grain, **no audible effect** on any periodic wave (kept for patch compatibility) | 1 source span |
@@ -127,33 +128,33 @@ accepts quoted status keys and retains library metadata/license documentation.
 
 ## Samples and limitations
 
-- WAV: mono/stereo PCM 8/16/24/32-bit or float32/64, including standard WAVE_FORMAT_EXTENSIBLE; 8–192 kHz, 2 frames–300 s. Maximum 256 MiB per file; session limits: 512 MiB source files and 48 million decoded mono frames. Stereo uses the **left channel** as the mono source.
+* WAV: mono/stereo PCM 8/16/24/32-bit or float32/64, including standard WAVE_FORMAT_EXTENSIBLE; 8–192 kHz, 2 frames–300 s. Maximum 256 MiB per file; session limits: 512 MiB source files and 48 million decoded mono frames. Stereo uses the **left channel** as the mono source.
   Csound GEN01 decodes it; `ftsr` corrects playback for its original sample rate.
-- JS only selects, validates headers, retains bytes and uploads to Csound's VFS.
+* JS only selects, validates headers, retains bytes and uploads to Csound's VFS.
   It does not decode, resample or synthesize grain audio.
-- Eight sample slots are shared across module instances **within this app session**.
+* Eight sample slots are shared across module instances **within this app session**.
   Files survive Stop/Start and Recompile, but are not embedded in patch JSON,
   saved to IndexedDB, or restored after closing/reloading the app. Reimport them.
-- Replacing a sample briefly restarts the whole audio engine and clears live rings.
+* Replacing a sample briefly restarts the whole audio engine and clears live rings.
   This avoids replacing a table underneath active voices. CSD exports still need
   the corresponding VFS-named WAV files beside the exported score; they are not
   self-contained sample bundles.
-- Grain Osc currently uses the existing sine table, with a 220 Hz root pitch.
+* Grain Osc currently uses the existing sine table, with a 220 Hz root pitch.
   Additional waveform selection, reverse playback, bandlimited interpolation,
   asynchronous density jitter and stereo grain sources are not implemented.
-- Looping an arbitrary sample can cross a discontinuous boundary. Linear
+* Looping an arbitrary sample can cross a discontinuous boundary. Linear
   interpolation and the grain window do not remove all loop clicks or aliasing
   at high transposition. There is no automatic source seam crossfade.
-- Live duration is conservatively reduced so the complete grain read trajectory
+* Live duration is conservatively reduced so the complete grain read trajectory
   and subsequent writer trajectory fit recorded history, including unfreezing
   during a grain. Initially empty or frozen rings output silence.
-- Pool saturation caps overlap; requested density × size above 64 does not create
+* Pool saturation caps overlap; requested density × size above 64 does not create
   unbounded voices. In the headless smoke run, a saturated instance rendered 1 s
   in about 1.33 s, so **high overlap can exceed real-time CPU capacity** on the
   test machine. Default settings were about 0.3 s per rendered second. These
   non-isolated test timings are not an audio-device benchmark; reduce Density,
   Size or the number of instances if playback breaks up.
-- Validation covers the browser build. Native Tauri packaging and listening on
+* Validation covers the browser build. Native Tauri packaging and listening on
   every audio device have not been tested. Existing OSC bridge connection errors
   are unrelated when the optional bridge on port 8765 is not running.
 
@@ -165,7 +166,7 @@ Browser-based checks use Playwright Core and require a compatible Chrome or Chro
 
 The project launcher invokes Vite directly; use its build mode to build the host.
 
-```powershell
+```
 node tests/contracts.mjs
 node tests/install.mjs
 node tests/dsp.mjs
@@ -177,8 +178,7 @@ node tests/integration.mjs
 Tests use the exact production `@csound/browser@7.0.0-beta33`, reporting Csound 7
 double samples, commit `ded5d15dece77539c04fbaaa160144df090771e2` (2026-08-12).
 `playwright-core@1.65.0` drives existing Chrome; `CHROME_PATH` can override it.
-For DSP tests, raw float output avoids beta33's WASI WAV-header seek/write issue;
-the test adds a WAV container afterward without changing any rendered sample.
+For DSP tests, raw float output avoids beta33's WASI WAV-header seek/write issue;the test adds a WAV container afterward without changing any rendered sample.
 Outputs and screenshots are in ignored `test-results/`.
 
 Generic opcodes exercised by actual WASM compilation/rendering include `xin`,
