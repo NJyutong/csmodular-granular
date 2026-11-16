@@ -1,0 +1,748 @@
+diff --git a/src/ModuleFactory.js b/src/ModuleFactory.js
+index 1bfc86d..d9d8b43 100644
+--- a/src/ModuleFactory.js
++++ b/src/ModuleFactory.js
+@@ -28,6 +28,7 @@ import { PartSelector } from './components/PartSelector.js';
+ import { BaseJack } from './components/BaseJack.js';
+ import { getEffectiveRating } from './api/moduleRatingStore.js';
+ import { getModuleStatus } from './api/moduleStatusStore.js';
++import { getUiLanguage, localize } from './utils/locale.js';
+ 
+ 
+ // ModuleFactory.js
+@@ -120,6 +121,16 @@ export class ModuleFactory {
+                 return false;
+             }
+ 
++            // Resolve UI copy when the module enters the registry. DSP identifiers remain stable.
++            moduleDef.uiLanguage = getUiLanguage();
++            if (moduleDef.displayNameI18n) moduleDef.displayName = localize(moduleDef.displayNameI18n, moduleDef.uiLanguage);
++            if (moduleDef.tooltipI18n) moduleDef.tooltip = localize(moduleDef.tooltipI18n, moduleDef.uiLanguage);
++            for (const component of moduleDef.components || []) {
++                if (component.itemsI18n) component.items = localize(component.itemsI18n, moduleDef.uiLanguage);
++                if (component.textI18n) component.text = localize(component.textI18n, moduleDef.uiLanguage);
++                if (component.connectorNameI18n) component.ConnectorName = localize(component.connectorNameI18n, moduleDef.uiLanguage);
++            }
++
+             // ⭐ Метаданные источника
+             moduleDef.library = lib;
+             moduleDef.type = moduleDef.type || name;
+@@ -352,6 +363,14 @@ export class ModuleFactory {
+                     compDef.items || 'One,Two,Three,Four',
+                     compDef.initialIndex || 0
+                 );
++                if (compDef.binaryThreshold) {
++                    component.getValue = () => component.currentIndex;
++                    component.setValue = value => component.setIndex(Number(value) >= 0.5 ? 1 : 0);
++                    component.setValueDirect = value => {
++                        component.currentIndex = Number(value) >= 0.5 ? 1 : 0;
++                        component.currentItem = component.items[component.currentIndex];
++                    };
++                }
+                 break;
+ 
+             case 'TextField':
+@@ -785,4 +804,4 @@ export class ModuleFactory {
+         comp.parent = panel;
+         if (comp.setParentModule) comp.setParentModule(panel);
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/src/csound/CsoundEngine.js b/src/csound/CsoundEngine.js
+index 40c1e2e..9a5a305 100644
+--- a/src/csound/CsoundEngine.js
++++ b/src/csound/CsoundEngine.js
+@@ -3,9 +3,9 @@
+ // Единая точка работы с Csound.
+ // Все обращения к Csound-инстансу — только через этот класс.
+ //
+-// Версия: @csound/browser 6.18.7 (через CDN unpkg)
+-
+-//export const CSOUND_VERSION = '6.18.7';
++// Runtime: @csound/browser 7.0.0-beta33, loaded from unpkg.
++import { GrainSamples } from './GrainSamples.js';
++import { localize } from '../utils/locale.js';
+ export const CSOUND_VERSION = '7.0.0-beta33';
+ export const CSOUND_CDN = `https://www.unpkg.com/@csound/browser@${CSOUND_VERSION}/dist/csound.js`;
+ 
+@@ -17,6 +17,8 @@ export class CsoundEngine {
+         this.lastRecompileMs = null;
+         this.lastRecompileAt = null;
+         this.isRecompiling = false;
++        this.grainSamples = new GrainSamples();
++        this._loadingGrainSample = false;
+         // Подписчики на события
+         this._stateListeners = [];
+         this._messageListeners = [];
+@@ -104,6 +106,7 @@ export class CsoundEngine {
+             window.csound = this.instance;
+ 
+             this._attachCsoundListeners();
++            await this.grainSamples.upload(this.instance);
+ 
+             await this.instance.setOption('-odac');
+             await this.instance.setOption('-M0');       mark('setOptions');
+@@ -149,7 +152,7 @@ export class CsoundEngine {
+         } catch (error) {
+             console.error('[CsoundEngine] Init error:', error);
+             this._emitMessage(error.message || String(error), 'error');
+-            this.instance = null;
++            await this._destroyInstance();
+             this._setState('error', error.message);
+             return false;
+ 
+@@ -158,6 +161,35 @@ export class CsoundEngine {
+         }
+     }
+ 
++    async loadGrainSample(slot, file) {
++        if (this._loadingGrainSample || this.isRecompiling || this.state === 'initializing') {
++            throw new Error(localize({en:'Wait for the current audio operation to finish.',zh:'请等待当前音频操作完成。',ru:'Дождитесь завершения текущей операции со звуком.'}));
++        }
++        this._loadingGrainSample = true;
++        const previous = this.grainSamples.slots.get(slot);
++        const wasRunning = this.state === 'running';
++        try {
++            const entry = await this.grainSamples.load(slot, file);
++            // Restart rebuilds tables atomically; no voice reads a replaced table.
++            if (wasRunning) {
++                await this.stop();
++                if (!await this.init()) throw new Error(localize({
++                    en: 'Csound could not load this WAV. Check that its audio encoding is supported.',
++                    zh: 'Csound 无法读取该 WAV，请检查音频编码是否受支持。',
++                    ru: 'Csound не смог прочитать WAV. Проверьте, поддерживается ли формат аудиоданных.',
++                }));
++            }
++            return entry;
++        } catch (error) {
++            if (previous) this.grainSamples.slots.set(slot, previous);
++            else this.grainSamples.slots.delete(slot);
++            if (wasRunning && this.state !== 'running') await this.init();
++            throw error;
++        } finally {
++            this._loadingGrainSample = false;
++        }
++    }
++
+     async stop() {
+         if (this.state === 'idle') {
+             //console.log('[CsoundEngine] Already stopped');
+@@ -202,15 +234,16 @@ export class CsoundEngine {
+ 
+         try {
+             await this.instance.reset();                mark('reset');
++            await this.grainSamples.upload(this.instance);
+ 
+             await this.instance.setOption('-odac');
+             await this.instance.setOption('-M0');       mark('setOptions');
+ 
+             const orc = await this.system.csoundGen.generateOrc(); mark('generateOrc');
+ 
+-            // Note: @csound/browser readScore() returns Promise<undefined> — no status code.
+-            // Do not compare against 0. Rely on try/catch + Csound message channel instead.
+-            await this.instance.compileOrc(orc);
++            // compileOrc returns a status code; readScore below does not.
++            const result = await this.instance.compileOrc(orc);
++            if (result !== 0) throw new Error(`ORC compilation failed (code ${result}).`);
+ 
+             const sco = 'i1 0 [60*60*24*7]\ni2 0 [60*60*24*7]\ni3 0 [60*60*24*7]\ni5 0 [60*60*24*7]';
+             await this.instance.readScore(sco);
+@@ -561,4 +594,4 @@ export class CsoundEngine {
+         
+         console.warn('[CsoundEngine] No message listener API found');
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/src/csound/CsoundGenerator.js b/src/csound/CsoundGenerator.js
+index 0965e9f..b4977b1 100644
+--- a/src/csound/CsoundGenerator.js
++++ b/src/csound/CsoundGenerator.js
+@@ -133,12 +133,27 @@ export class CsoundGenerator {
+     }
+ 
+     async loadAllUdoContents() {
+-        const udoContents = [];
+-        for (const filename of this.includes) {
+-            const content = await this._loadUdoByPath(filename);
+-            if (content) udoContents.push(content);
+-        }
+-        return udoContents;
++        return this._loadOrderedUdos();
++    }
++
++    // Shared UDO dependencies precede their callers and are emitted once.
++    async _loadOrderedUdos() {
++        const contents = [], visited = new Set(), visiting = new Set();
++        const visit = async (path, required = false) => {
++            if (visited.has(path)) return;
++            if (visiting.has(path)) throw new Error(`Circular UDO dependency: ${path}`);
++            visiting.add(path);
++            const content = await this._loadUdoByPath(path);
++            if (!content) throw new Error(`UDO ${required ? 'dependency ' : ''}not available: ${path}`);
++            for (const match of content.matchAll(/^;\s*@\s*requires\s+([A-Za-z0-9_-]+\.txt)\s*$/gm)) {
++                await visit(match[1], true);
++            }
++            visiting.delete(path);
++            visited.add(path);
++            contents.push(content);
++        };
++        for (const path of [...this.includes].sort()) await visit(path);
++        return contents;
+     }
+ 
+     async generateOrc() {
+@@ -152,22 +167,9 @@ export class CsoundGenerator {
+         
+         this._fetchStats = { count: 0, ms: 0, byPath: {} };
+ 
+-        const includesList = Array.from(this.includes).sort();
+-        const udoTexts = await Promise.all(
+-            includesList.map(p => this._loadUdoByPath(p))
+-        );
+-
+-        const udoContents = udoTexts.map((content, i) => {
+-            if (content) return content;
+-            const filename = includesList[i];
+-            console.warn(`⚠️ UDO not available: ${filename}`);
+-            const opcodeName = filename.replace(/^.*\//, '').replace(/\.txt$/, '');
+-            return (
+-                `; UDO ${filename} not found\n` +
+-                `opcode ${opcodeName}, 0, 0\n` +
+-                `; empty\nendop`
+-            );
+-        });
++        const udoContents = await this._loadOrderedUdos();
++        const sampleTables = udoContents.some(text => /opcode\s+GrainSample\s*,/.test(text))
++            ? this.system.csoundEngine.grainSamples.orchestra() : '';
+ 
+         const udoString = udoContents.join('\n\n');
+ 
+@@ -269,6 +271,7 @@ export class CsoundGenerator {
+     ${scopeCode.ftgens}
+     ;---------------------------------
+     ; UDO section (inlined from /csound/modules/*.txt)
++    ${sampleTables}
+     ${udoString}
+ 
+     ;---------------------------------
+@@ -1531,4 +1534,4 @@ export class CsoundGenerator {
+     }
+ 
+ 
+-}
+\ No newline at end of file
++}
+diff --git a/src/csound/GrainSamples.js b/src/csound/GrainSamples.js
+new file mode 100644
+index 0000000..90ec074
+--- /dev/null
++++ b/src/csound/GrainSamples.js
+@@ -0,0 +1,93 @@
++import { localize } from '../utils/locale.js';
++// File transport and metadata validation only. Csound decodes and processes audio.
++export class GrainSamples {
++    static MAX_FILE_BYTES = 256 * 1024 * 1024;
++    static MAX_SESSION_BYTES = 512 * 1024 * 1024;
++    static MAX_FILE_SECONDS = 300;
++    // GEN01 expands each mono sample into the build's double-precision Csound table.
++    static MAX_SESSION_FRAMES = 48_000_000;
++
++    constructor() {
++        this.slots = new Map();
++        this.revision = 0;
++        this.uploaded = new WeakMap();
++    }
++
++    async load(slot, file) {
++        if (!Number.isInteger(slot) || slot < 1 || slot > 8) throw new Error(localize({"en":"Sample slot must be 1 to 8.","zh":"采样槽必须是 1 到 8。","ru":"Номер слота должен быть от 1 до 8."}));
++        if (!file || !Number.isFinite(file.size) || file.size < 44) throw new Error(localize({"en":"Choose a valid WAV file.","zh":"请选择有效的 WAV 文件。","ru":"Выберите корректный файл WAV."}));
++        if (file.size > GrainSamples.MAX_FILE_BYTES) throw new Error(localize({"en":"Each WAV file must be no larger than 256 MiB.","zh":"单个 WAV 文件不能超过 256 MiB。","ru":"Размер одного WAV не должен превышать 256 МиБ."}));
++        const previous = this.slots.get(slot);
++        const sessionBytes = [...this.slots.values()].reduce((sum, entry) => sum + entry.bytes.length, 0)
++            - (previous?.bytes.length ?? 0);
++        if (sessionBytes + file.size > GrainSamples.MAX_SESSION_BYTES) throw new Error(localize({"en":"This session supports up to 512 MiB of WAV files. Reload the app to clear samples.","zh":"当前会话最多可载入 512 MiB 的 WAV 文件，请先关闭应用后重新选择文件。","ru":"В одном сеансе можно загрузить до 512 МиБ WAV. Перезагрузите приложение, чтобы очистить сэмплы."}));
++        const bytes = new Uint8Array(await file.arrayBuffer());
++        if (bytes.length !== file.size) throw new Error(localize({"en":"Could not read the complete file. Retry or choose a smaller WAV.","zh":"无法完整读取该文件，请重试或选择较小的 WAV 文件。","ru":"Не удалось прочитать файл полностью. Повторите попытку или выберите WAV меньшего размера."}));
++        const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
++        const tag = offset => String.fromCharCode(...bytes.subarray(offset, offset + 4));
++        if (tag(0) !== 'RIFF' || tag(8) !== 'WAVE') throw new Error(localize({"en":"Expected RIFF/WAVE. RF64 and big-endian WAV are not supported.","zh":"文件不是标准 RIFF/WAVE 格式；暂不支持 RF64 和大端 WAV。","ru":"Требуется RIFF/WAVE. RF64 и WAV с обратным порядком байтов не поддерживаются."}));
++        let format, frames = 0;
++        for (let offset = 12; offset + 8 <= bytes.length;) {
++            const size = view.getUint32(offset + 4, true), start = offset + 8;
++            if (start + size > bytes.length) throw new Error(localize({"en":"WAV data is incomplete; the file may be damaged.","zh":"WAV 文件数据不完整，文件可能已损坏。","ru":"Данные WAV неполны; возможно, файл повреждён."}));
++            if (tag(offset) === 'fmt ' && size >= 16) {
++                let code = view.getUint16(start, true);
++                if (code === 0xfffe && size >= 40) {
++                    const tail = [0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71];
++                    const standardGuid = view.getUint16(start + 28, true) === 0
++                        && view.getUint16(start + 30, true) === 0x0010
++                        && tail.every((v, i) => bytes[start + 32 + i] === v);
++                    if (!standardGuid) throw new Error(localize({"en":"This WAV uses an unsupported extended audio encoding.","zh":"该 WAV 使用了不支持的扩展音频编码。","ru":"Этот WAV использует неподдерживаемый расширенный формат аудио."}));
++                    code = view.getUint32(start + 24, true);
++                }
++                format = { code, channels: view.getUint16(start + 2, true),
++                    rate: view.getUint32(start + 4, true), align: view.getUint16(start + 12, true), bits: view.getUint16(start + 14, true) };
++            }
++            if (tag(offset) === 'data') frames += size;
++            offset = start + size + size % 2;
++        }
++        if (!format || ![1, 3].includes(format.code) || ![1, 2].includes(format.channels)
++            || ![8, 16, 24, 32, 64].includes(format.bits) || (format.code === 3 && ![32, 64].includes(format.bits))
++            || (format.code === 1 && format.bits === 64)
++            || format.align !== format.channels * format.bits / 8 || format.rate < 8000 || format.rate > 192000
++            || frames % format.align !== 0 || frames / format.align < 2) {
++            throw new Error(localize({"en":"Use mono/stereo WAV, 8–192 kHz, PCM 8/16/24/32-bit or IEEE float32/64, with at least 2 audio frames.","zh":"WAV 格式暂不支持。请使用 8–192 kHz、单声道或立体声的 PCM 8/16/24/32 位、IEEE float32/64，且文件至少包含 2 帧音频。","ru":"Используйте моно/стерео WAV, 8–192 кГц, PCM 8/16/24/32 бит или IEEE float32/64, не менее 2 кадров."}));
++        }
++        const frameCount = frames / format.align;
++        const seconds = frameCount / format.rate;
++        if (seconds > GrainSamples.MAX_FILE_SECONDS) throw new Error(localize({"en":"Each WAV may be up to 5 minutes long.","zh":"单个 WAV 最长支持 5 分钟。","ru":"Длительность одного WAV не должна превышать 5 минут."}));
++        const sessionFrames = [...this.slots.values()].reduce((sum, entry) => sum + entry.frames, 0)
++            - (previous?.frames ?? 0);
++        if (sessionFrames + frameCount > GrainSamples.MAX_SESSION_FRAMES) {
++            throw new Error(localize({"en":"Decoded samples exceed 48 million mono frames. Reload the app and load fewer or shorter samples.","zh":"当前会话的采样总时长或采样率过高。单声道解码缓冲最多支持 4,800 万帧；请关闭应用并减少已载入采样。","ru":"Превышен предел 48 миллионов монофонических кадров. Перезагрузите приложение и загрузите меньше сэмплов или укоротите их."}));
++        }
++        const entry = { bytes, frames: frameCount, name: file.name, path: `grain-${slot}-${++this.revision}.wav` };
++        this.slots.set(slot, entry);
++        return entry;
++    }
++
++    async upload(csound) {
++        let paths = this.uploaded.get(csound);
++        if (!paths) { paths = new Set(); this.uploaded.set(csound, paths); }
++        for (const { path, bytes } of this.slots.values()) {
++            // reset() preserves the virtual filesystem. beta33 must not overwrite files.
++            if (paths.has(path)) continue;
++            await csound.fs.writeFile(path, bytes);
++            paths.add(path);
++        }
++    }
++
++    orchestra() {
++        const lines = [];
++        for (let slot = 1; slot <= 8; slot++) {
++            const entry = this.slots.get(slot);
++            lines.push(entry
++                ? `giGrainSample${slot} ftgen 0, 0, 0, -1, "${entry.path}", 0, 0, 1`
++                : `giGrainSample${slot} ftgen 0, 0, 2, -2, 0`);
++        }
++        lines.push(`giGrainSampleTables[] fillarray ${Array.from({ length: 8 }, (_, i) => `giGrainSample${i + 1}`).join(', ')}`);
++        lines.push(`giGrainSampleFrames[] fillarray ${Array.from({ length: 8 }, (_, i) => `ftlen(giGrainSample${i + 1})`).join(', ')}`);
++        lines.push(`giGrainSampleRates[] fillarray ${Array.from({ length: 8 }, (_, i) => this.slots.has(i + 1) ? `ftsr(giGrainSample${i + 1})` : 'sr').join(', ')}`);
++        return lines.join('\n');
++    }
++}
+diff --git a/src/ui/GranularGuide.js b/src/ui/GranularGuide.js
+new file mode 100644
+index 0000000..7bbdd4c
+--- /dev/null
++++ b/src/ui/GranularGuide.js
+@@ -0,0 +1,81 @@
++import { localize } from '../utils/locale.js';
++const t = (en, zh, ru) => localize({ en, zh, ru });
++
++// One reusable guide for the whole application and each granular module.
++export function installGranularGuide(system) {
++    if (document.getElementById('granular-guide-open')) return;
++    const style = document.createElement('style');
++    style.textContent = `
++      #granular-guide-open { position:fixed;right:16px;top:12px;z-index:9000;padding:9px 14px;background:#253847;color:#fff;border:1px solid #708b9f;border-radius:4px;cursor:pointer;font:inherit; }
++      #granular-guide { box-sizing:border-box;margin:auto;width:min(680px,calc(100vw - 32px));max-height:85vh;overflow:auto;padding:24px;background:#25292d;color:#f2f4f6;border:1px solid #71818d;border-radius:6px;font:15px/1.65 system-ui,sans-serif; }
++      #granular-guide::backdrop {background:rgba(0,0,0,.65)}
++      #granular-guide h2 {margin:0 0 16px;font-size:24px} #granular-guide h3 {margin:22px 0 8px;font-size:18px}
++      #granular-guide ol {padding-left:24px} #granular-guide p {margin:8px 0} #granular-guide li {margin:8px 0} #granular-guide summary {cursor:pointer;font-weight:600;padding:10px 0}
++      #granular-guide button {padding:9px 14px;background:#344b5e;color:#fff;border:1px solid #8298a9;border-radius:4px;font:inherit;cursor:pointer}
++      #granular-guide button:focus-visible,#granular-guide summary:focus-visible,#granular-guide-open:focus-visible {outline:3px solid #a9d9ff;outline-offset:3px}
++      #granular-guide .guide-actions {display:flex;gap:12px;flex-wrap:wrap;margin:18px 0}
++      #granular-guide [role=status] {color:#ffe0a3}
++    `;
++    document.head.append(style);
++    const open = document.createElement('button');
++    open.id = 'granular-guide-open';
++    open.textContent = t('Start here', '入门指南', 'Начать здесь');
++    open.onclick = () => showGranularGuide(system);
++    document.body.append(open);
++}
++
++export function showGranularGuide(system, moduleName = '') {
++    document.getElementById('granular-guide')?.remove();
++    const dialog = document.createElement('dialog');
++    dialog.id = 'granular-guide';
++    dialog.setAttribute('aria-labelledby','granular-guide-title');
++    const add = (tag, text, parent = dialog) => { const el=document.createElement(tag);el.textContent=text;parent.append(el);return el; };
++    add('h2', t('Your first sound', '从零开始，让它发声', 'Ваш первый звук')).id='granular-guide-title';
++    add('p', t('A patch is a set of modules connected by cables. A source makes sound; Outs2 sends it to your speakers.', '一个“音色工程”由模块和连线组成。声源模块产生声音，Outs2 输出模块把声音送到扬声器。只有声源，没有连接到 Outs2，也听不到声音。', 'Патч — это модули, соединённые кабелями. Источник создаёт звук, а Outs2 выводит его на динамики.'));
++    const steps=add('ol','');
++    for(const text of [
++        t('Load the starter below. It connects Grain Osc → Outs2; no WAV or microphone is needed.', '点击下方“加载发声示例”。它已经连好“颗粒振荡器 → Outs2”，不需要 WAV 文件或麦克风。', 'Загрузите пример ниже: Grain Osc → Outs2. Файл WAV и микрофон не нужны.'),
++        t('Lower your speaker volume, then press ▶ in the bottom bar. Press ■ to stop.', '先调低扬声器音量，再点击底栏的 ▶ 开始播放；点击 ■ 停止。', 'Уменьшите громкость динамиков и нажмите ▶ на нижней панели. Кнопка ■ останавливает звук.'),
++        t('Drag Pitch up/down to hear the note change. Then try Grain Size and Density, one at a time.', '按住“音高”旋钮上下拖动，听音高变化。再分别试“粒长”和“颗粒/秒”，一次只改一个参数。', 'Перетаскивайте регулятор высоты вверх/вниз. Затем попробуйте длительность и плотность гранул по одному.')
++    ])add('li',text,steps);
++    const actions=add('div','');actions.className='guide-actions';
++    const load=add('button',t('Load starter patch','加载发声示例','Загрузить пример'),actions);
++    const close=add('button',t('Close guide','关闭指南','Закрыть'),actions);close.onclick=()=>dialog.close();
++    const status=add('p','');status.setAttribute('role','status');
++    load.onclick=async()=>{
++        if(system.locked){status.textContent=t('Unlock the patch first using the lock control in the bottom bar.','请先通过底栏的锁定按钮解锁工程。','Сначала разблокируйте патч кнопкой замка на нижней панели.');return;}
++        if(system.components?.length && !confirm(t('Replace the current patch? Save your work first.','示例会替换当前工程。请先保存现有工程，是否继续？','Заменить текущий патч? Сначала сохраните свою работу.')))return;
++        load.disabled=true;
++        try{
++            await system.csoundEngine?.stop();
++            const response=await fetch('/patches/granular-demo.json');if(!response.ok)throw Error('demo');
++            const patch=await response.json();
++            patch.modules=patch.modules.filter(m=>m.name==='GrainOsc'||m.name==='Outs2');
++            patch.modules.forEach(m=>{m.hpos=m.name==='GrainOsc'?2:17;m.vpos=4;});
++            const osc=patch.modules.find(m=>m.name==='GrainOsc'),out=patch.modules.find(m=>m.name==='Outs2');
++            patch.cables=[0,1].map(jack=>({from:{id:osc.id,jack,pin:'out'},to:{id:out.id,jack,pin:'in'},type:'out-in',area:'VOICE'}));
++            patch.textpad='Grain Osc L/R -> Outs2 L/R';
++            const result=await system.loadPatchFromJson(patch);
++            if(result===false||result?.success===false)throw Error('load');
++            dialog.close();system.showNotification(t('Starter connected. Press ▶ in the bottom bar to hear it.','发声示例已连接。点击底栏 ▶ 开始播放。','Пример подключён. Нажмите ▶ на нижней панели.'));
++        }catch{status.textContent=t('Could not load the example. Check that the granular library is installed.','示例加载失败，请检查颗粒模块库是否已安装。','Не удалось загрузить пример. Проверьте установку библиотеки.');}
++        finally{load.disabled=false;}
++    };
++    add('h3',t('Which module do I use?','三个模块怎么选？','Какой модуль выбрать?'));
++    const sections = [
++        ['GrainOsc',t('Grain Osc — sound without a file','颗粒振荡器：不用文件就能发声','Grain Osc — звук без файла'),t('Built-in wave: Waveform 0 sine, 1 triangle, 2 saw, 3 square; Pitch 0 = 220 Hz (A3). Connect L/R to Outs2. The optional dry input is unnecessary for your first sound. Phase jitter and Pitch jitter make the tone rougher or detuned. Phase and Hold position (under Advanced) have no audible effect on a periodic wave; they stay so that older patches still load.', '内置波形：“波形”0 正弦、1 三角、2 锯齿、3 方波；音高 0 = 220 Hz（A3）。左右输出接到 Outs2 即可，第一次使用不用连接“干声输入”。“相位抖动”和“音高抖动”会让音色变粗糙或带失谐感。“相位”和“锁定位置”（在“进阶”区）对周期波形没有听感影响，保留它们是为了让旧工程仍能加载。', 'Встроенная волна: «Форма волны» 0 синус, 1 треугольник, 2 пила, 3 меандр; высота 0 = 220 Гц (A3). Подключите Л/П к Outs2. Сухой вход необязателен. «Разброс фазы» и «Разброс высоты» делают тон грубее или расстроеннее. «Фаза» и фиксация (раздел «Далее») на периодическую волну не влияют; они оставлены для совместимости со старыми патчами.')],
++        ['GrainSample',t('Grain Sample — play your WAV','颗粒采样：播放你的 WAV 文件','Grain Sample — ваш файл WAV'),t('Select a slot (1–8), right-click the module → Load WAV, then connect L/R to Outs2. Empty slots are silent. Sample position chooses a point in the file and Position jitter scatters it. Scan moves the position through the file by itself (percent of the file per second, negative = backwards); Hold position pauses the scan and ignores Position changes while on. Reload the WAV after refreshing the app.', '选择采样槽（1–8），右键模块 → 导入 WAV，再把左右输出接到 Outs2。空槽没有声音。“采样位置”决定读取文件的哪一段，“位置抖动”让它随机散开。“扫描”让位置自动在文件中移动（每秒走过文件的百分比，负数为倒走）；“锁定位置”开启后会暂停扫描并忽略位置变化。刷新应用后需重新导入文件。', 'Выберите слот 1–8, ПКМ по модулю → Загрузить WAV, затем Л/П → Outs2. Пустой слот молчит. Позиция выбирает участок файла, «Разброс поз.» рассеивает его. «Скан.» сам двигает позицию по файлу (% файла в секунду, минус — назад); фиксация останавливает скан и игнорирует изменения позиции. После обновления страницы загрузите файл снова.')],
++        ['GrainFreeze',t('Grain Freeze — capture another module','颗粒冻结：抓取其他模块的声音','Grain Freeze — захват звука'),t('Connect Grain Osc L → Audio in, then L/R → Outs2. Leave Record on for a few seconds; select Freeze to stop recording and play the captured buffer. An empty frozen buffer is silent. Lookback selects older recorded audio, up to about 4 seconds back.', '先接“颗粒振荡器左输出 → 音频输入”，再把本模块左右输出接到 Outs2。保持“录入”几秒，然后切到“冻结”，就会停止录入并反复读取缓冲里的声音。空缓冲直接冻结不会发声。“回看位置”选择更早录入的声音，最多回看约 4 秒。', 'Подключите Grain Osc Л → аудиовход, затем Л/П → Outs2. Запишите несколько секунд и включите заморозку. Пустой замороженный буфер молчит. Позиция выбирает более раннюю запись, до ~4 с назад.')],
++    ];
++    for(const [name,title,body]of sections){const detail=add('details','');detail.open=name===moduleName;add('summary',title,detail);add('p',body,detail);}
++    add('h3',t('Shared controls','为什么有相同的控制？','Общие регуляторы'));
++    add('p',t('All three cut their source into short grains. Density is grains per second; Size is each grain’s duration. Pitch changes playback rate. Jitter adds random offsets; Spread widens the stereo image. Start with the defaults.', '三者都把各自的声源切成短小的“颗粒”，所以共享颗粒参数：颗粒/秒控制数量，粒长控制每颗粒持续时间，音高改变播放速率，抖动加入随机变化，声像扩展让声音分布到左右两边。初学时保持默认值即可。', 'Все три создают короткие гранулы. Плотность — гранул в секунду, длина — длительность гранулы, высота — скорость чтения. Разброс добавляет случайность, панорама распределяет звук между каналами. Начните с настроек по умолчанию.'));
++    add('p',t('At most 64 grains play at once. If Grains/s × Size (in seconds) is above 64, extra grains are skipped and the cloud gets thinner than the knobs suggest. Each panel follows the order you will use it: sections 1 and 2 make the sound, 3 sets the stereo output, Advanced holds rarely needed controls.', '最多同时播放 64 个颗粒：当“颗粒/秒 × 粒长（秒）”超过 64 时，多出的颗粒会被跳过，听起来比旋钮显示的稀疏。面板按使用顺序排列：1、2 区决定声音，3 区决定立体声输出，“进阶”区放不常用的控制。', 'Одновременно звучит не более 64 гранул: если «гранул/с × длина (с)» больше 64, лишние гранулы пропускаются и облако получается реже, чем показывают регуляторы. Панель устроена по порядку работы: разделы 1 и 2 формируют звук, 3 — стереовыход, «Далее» — редко нужные регуляторы.'));
++    add('p',t('Grain window shapes each grain’s fade in/out: Hann is rounded, Triangle has straight slopes. Click the selector arrows to choose. It is unrelated to an application window. The mix knob (Dry/wet on Freeze, Grain/dry mix on Osc and Sample) at maximum is fully granular; at 0 you only hear the optional dry input. Seed is an advanced repeatability control.', '“颗粒包络”决定每个颗粒如何淡入和淡出：汉宁窗是圆滑曲线，三角窗是直线斜坡。点击选择器的小箭头切换。“窗”是音频术语，与软件窗口无关。混合旋钮（冻结模块叫“干湿比”，其余叫“颗粒/干声比”）拉满是纯颗粒声，0 只输出干声输入；随机种子是复现随机效果的进阶参数。', 'Окно гранулы задаёт нарастание и затухание: Ханн — плавная кривая, треугольное — прямые склоны. Переключайте стрелками. Микс на максимуме — только гранулы, 0 — только сухой вход. Seed нужен для повторяемой случайности.'));
++    add('h3',t('Build and save your own patch','自己添加、连线和保存','Собрать и сохранить патч'));
++    add('p',t('Space opens the module menu. Drag from an output jack to an input jack and release. Both modules must be in the same Voice/FX layer. Drag knobs vertically; Ctrl+wheel zooms and Space+drag pans. Use Save/Load in the main menu to keep your patch; WAV files must be reimported.', '空格键打开模块菜单。按住输出插孔，拖到目标输入插孔后松开即可连线；两个模块必须位于同一 Voice/FX 层。旋钮上下拖动调节；Ctrl+滚轮缩放，空格+拖动画布平移。通过主菜单 Save/Load 保存或打开工程，WAV 文件需要另行保留和重新导入。', 'Пробел открывает меню модулей. Перетащите кабель с выхода на вход. Оба модуля должны быть в одном слое Voice/FX. Регуляторы меняются вертикально; Ctrl+колесо — масштаб, пробел+перетаскивание — панорама. Save/Load сохраняет патч; WAV загрузите отдельно.'));
++    add('h3',t('No sound?','没有声音时按这个顺序检查','Нет звука?'));
++    add('p',t('Press ▶, check speaker volume, connect both outputs to Outs2, keep Density and Level above zero and the mix knob at maximum. Load a WAV for Sample; record before freezing for Freeze. Ignore the small modulation jacks until you are ready.', '先看是否已按 ▶、扬声器是否有音量；再看左右输出是否接到 Outs2，颗粒/秒和输出电平是否大于 0，混合旋钮是否拉满。采样模块要先导入 WAV，冻结模块要先录入声音。旋钮旁的小插孔是调制输入，初学时可以全部留空。', 'Нажмите ▶, проверьте громкость и соединения с Outs2. Плотность и уровень должны быть выше нуля, микс — на максимуме. Для Sample загрузите WAV; для Freeze сначала запишите звук. Малые входы модуляции можно оставить пустыми.'));
++    dialog.addEventListener('keydown', e => e.stopPropagation());
++    document.body.append(dialog);dialog.addEventListener('close',()=>dialog.remove());dialog.showModal();
++}
+\ No newline at end of file
+diff --git a/src/ui/ModuleContextMenu.js b/src/ui/ModuleContextMenu.js
+index bc348fe..4af2767 100644
+--- a/src/ui/ModuleContextMenu.js
++++ b/src/ui/ModuleContextMenu.js
+@@ -1,6 +1,8 @@
++import { installGranularGuide, showGranularGuide } from './GranularGuide.js';
+ // src/ui/ModuleContextMenu.js
+ import { ColorPicker } from './ColorPicker.js';
+ import { injectColorPickerStyles } from './ColorPickerStyles.js';
++import { localize } from '../utils/locale.js';
+ const IS_DEV = import.meta.env.DEV;
+ export class ModuleContextMenu {
+   constructor(system) {
+@@ -8,6 +10,7 @@ export class ModuleContextMenu {
+     this.menuElement = null;
+     this.currentModule = null;
+ 
++    installGranularGuide(system);
+     this.createMenuElement();
+     this.setupEventListeners();
+     this.injectStyles();
+@@ -20,7 +23,7 @@ export class ModuleContextMenu {
+     this.menuElement.style.cssText = `
+             position: fixed;
+             min-width: 150px;
+-            max-width: 170px;
++            max-width: 290px;
+             background: #2a2a2a;
+             border: 1px solid #444;
+             border-radius: 6px;
+@@ -37,7 +40,7 @@ export class ModuleContextMenu {
+ 
+   show(module, x, y) {
+     if (this.system?.locked) {
+-      this.system.showNotification?.('🔒 Patch is locked');
++      this.system.showNotification?.(localize({"en":"🔒 Patch is locked","zh":"🔒 补丁已锁定","ru":"🔒 Патч заблокирован"}));
+       return;
+     }
+     this.currentModule = module;
+@@ -66,6 +69,51 @@ export class ModuleContextMenu {
+     // === ЗАГОЛОВОК ===
+     this.menuElement.appendChild(this.createHeader());
+ 
++    if (['GrainOsc','GrainSample','GrainFreeze'].includes(this.currentModule.jsonName)) {
++      const name = this.currentModule.jsonName;
++      this.menuElement.appendChild(this.createMenuItem(localize({en:'How to use this module',zh:'如何使用这个模块',ru:'Как использовать модуль'}), () => showGranularGuide(this.system, name)));
++    }
++    if (this.currentModule.jsonName === 'GrainSample') {
++      const slotControl = this.currentModule.components.find(c => String(c.id) === '14');
++      const slot = Math.max(1, Math.min(8, Math.round(slotControl?.value ?? 1)));
++      const sample = this.system.csoundEngine.grainSamples.slots.get(slot);
++      const info = document.createElement('div');
++      info.style.cssText = 'padding:8px;font-size:11px;overflow-wrap:anywhere';
++      const labels = {
++        en: `Slot ${slot}: ${sample?.name || 'empty'} · kept for this session · stereo WAV uses its left channel`,
++        zh: `采样槽 ${slot}：${sample?.name || '空'} · 仅保留在本次会话 · 立体声 WAV 使用左声道`,
++        ru: `Слот ${slot}: ${sample?.name || 'пусто'} · только на время сеанса · у стерео WAV используется левый канал`,
++      };
++      info.textContent = localize(labels);
++      this.menuElement.appendChild(info);
++      const loadLabels = {
++        en: `Load WAV → slot ${slot}…`,
++        zh: `导入 WAV → 采样槽 ${slot}…`,
++        ru: `Загрузить WAV → слот ${slot}…`,
++      };
++      this.menuElement.appendChild(this.createMenuItem(localize(loadLabels), () => {
++        this.hide();
++        const input = document.createElement('input');
++        input.type = 'file';
++        input.accept = '.wav,audio/wav,audio/wave,audio/x-wav';
++        input.onchange = async () => {
++          const file = input.files?.[0];
++          if (!file) return;
++          try {
++            await this.system.csoundEngine.loadGrainSample(slot, file);
++            this.system.showNotification(localize({
++              en: `Loaded ${file.name} into slot ${slot}. It will be available until the app closes.`,
++              zh: `已将 ${file.name} 导入采样槽 ${slot}，关闭应用后需要重新导入。`,
++              ru: `${file.name} загружен в слот ${slot}. После закрытия приложения его нужно загрузить снова.`,
++            }));
++          } catch (error) {
++            this.system.showNotification(error.message);
++          }
++        };
++        input.click();
++      }));
++    }
++
+     // === LAYER SWITCHER ===
+     const layerSection = document.createElement('div');
+     layerSection.style.cssText = `
+@@ -79,7 +127,7 @@ export class ModuleContextMenu {
+             font-size: 10px;
+             margin-bottom: 4px;
+         `;
+-    layerTitle.textContent = 'Layer:';
++    layerTitle.textContent = localize({"en":"Layer:","zh":"层：","ru":"Слой:"});
+     layerSection.appendChild(layerTitle);
+ 
+     const layerButtons = document.createElement('div');
+@@ -92,7 +140,7 @@ export class ModuleContextMenu {
+ 
+     // Voice button
+     const voiceBtn = document.createElement('button');
+-    voiceBtn.textContent = 'Voice';
++    voiceBtn.textContent = localize({"en":"Voice","zh":"声部","ru":"Голос"});
+     const isVoice = currentLayer === 'voice';
+     voiceBtn.style.cssText = `
+             flex: 1;
+@@ -159,7 +207,7 @@ export class ModuleContextMenu {
+     layerSection.appendChild(layerButtons);
+     this.menuElement.appendChild(layerSection);
+ 
+-    // === PANEL COLOR (dev only — legacy Classic feature) ===
++    // === PANEL COLOR (per-module override, both theme modes) ===
+     if (IS_DEV) {
+         const colorSection = document.createElement('div');
+         colorSection.style.cssText = `
+@@ -173,7 +221,7 @@ export class ModuleContextMenu {
+                 color: #aaa;
+                 font-size: 10px;
+             `;
+-        colorTitle.textContent = 'Panel color:';
++        colorTitle.textContent = localize({"en":"Panel color:","zh":"面板颜色：","ru":"Цвет панели:"});
+         colorSection.appendChild(colorTitle);
+ 
+         if (!this.colorPicker) {
+@@ -182,7 +230,7 @@ export class ModuleContextMenu {
+                 rows: 4,
+                 cellSize: 14,
+                 showReset: true,
+-                resetText: '↺ Default Gray',
++                resetText: localize({"en":"↺ Follow theme","zh":"↺ 跟随系统主题","ru":"↺ Цвет темы"}),
+                 onSelect: (color) => this.changePanelColor(color),
+                 onReset: () => this.resetPanelColor(),
+             });
+@@ -203,7 +251,7 @@ export class ModuleContextMenu {
+     this.menuElement.appendChild(this.createSeparator());
+     this.menuElement.appendChild(
+       this.createMenuItem(
+-        '🗑️ Delete Module',
++        localize({"en":"🗑️ Delete Module","zh":"🗑️ 删除模块","ru":"🗑️ Удалить модуль"}),
+         () => this.deleteModule(),
+         '#ff6b6b',
+       ),
+@@ -230,7 +278,7 @@ export class ModuleContextMenu {
+ 
+     // Название модуля (слева, синим)
+     const title = document.createElement('span');
+-    title.textContent = this.currentModule?.title || 'Module';
++    title.textContent = this.currentModule?.title || localize({"en":"Module","zh":"模块","ru":"Модуль"});
+ 
+     // ⭐ Категория (справа, серым) — вместо дублирующего jsonName
+     const category = document.createElement('span');
+@@ -254,10 +302,15 @@ export class ModuleContextMenu {
+       if (!m) return '';
+ 
+       if (m.category) {
+-          return m.category.charAt(0).toUpperCase() + m.category.slice(1);
++          const labels = {
++              fx: { en: 'FX', zh: '效果', ru: 'Эффекты' },
++              sample: { en: 'Sample', zh: '采样', ru: 'Сэмплы' },
++              osc: { en: 'Oscillator', zh: '振荡器', ru: 'Осциллятор' },
++          };
++          return labels[m.category] ? localize(labels[m.category]) : m.category.charAt(0).toUpperCase() + m.category.slice(1);
+       }
+-      if (m.isUser) return 'User';
+-      return 'Unknown';
++      if (m.isUser) return localize({"en":"User","zh":"用户","ru":"Пользователь"});
++      return localize({"en":"Unknown","zh":"未知","ru":"Неизвестно"});
+   }
+ 
+   // ============================================================
+@@ -303,7 +356,7 @@ export class ModuleContextMenu {
+ 
+   setLayer(newLayer) {
+     if (this.system?.locked) {
+-      this.system.showNotification?.('🔒 Patch is locked');
++      this.system.showNotification?.(localize({"en":"🔒 Patch is locked","zh":"🔒 补丁已锁定","ru":"🔒 Патч заблокирован"}));
+       return;
+     }
+     if (!this.currentModule) return;
+@@ -313,12 +366,12 @@ export class ModuleContextMenu {
+ 
+     const cables = this.system.patchManager.findCablesByModule(this.currentModule.moduleId);
+     if (cables.length > 0) {
+-      const layerNames = { voice: 'Voice', fx: 'FX' };
+-      const ok = confirm(
+-        `У модуля "${this.currentModule.title}" есть ${cables.length} кабел${cables.length === 1 ? 'ь' : cables.length < 5 ? 'я' : 'ей'}.\n\n` +
+-        `При смене слоя на ${layerNames[newLayer]} все кабели будут удалены.\n\n` +
+-        `Продолжить?`
+-      );
++      const layerNames = { voice: localize({"en":"Voice","zh":"声部","ru":"Голос"}), fx: 'FX' };
++      const ok = confirm(localize({
++        en: `Module "${this.currentModule.title}" has ${cables.length} cable(s). Switching to ${layerNames[newLayer]} will remove them. Continue?`,
++        zh: `模块“${this.currentModule.title}”有 ${cables.length} 条连线。切换到 ${layerNames[newLayer]} 层将删除这些连线。继续吗？`,
++        ru: `У модуля «${this.currentModule.title}» кабелей: ${cables.length}. При смене слоя на ${layerNames[newLayer]} они будут удалены. Продолжить?`,
++      }));
+       if (!ok) return;
+ 
+       cables.forEach(cable => {
+@@ -400,6 +453,7 @@ export class ModuleContextMenu {
+     this._changingColor = true;
+ 
+     this.currentModule.customColor = colorHex;
++    this.currentModule.setDirty?.(true);
+ 
+     if (this.currentModule.layer === 'voice') {
+         this.system._voiceDirty = true;
+@@ -407,7 +461,7 @@ export class ModuleContextMenu {
+         this.system._fxDirty = true;
+     }
+     this.system.forceRedraw?.();
+-    this.system.showNotification(`🎨 Panel color changed`);
++    this.system.showNotification(localize({en:'🎨 Panel color changed',zh:'🎨 面板颜色已更改',ru:'🎨 Цвет панели изменён'}));
+ 
+     setTimeout(() => {
+       this._changingColor = false;
+@@ -422,12 +476,10 @@ export class ModuleContextMenu {
+ 
+     this.currentModule.customColor = null;
+ 
+-    if (this.system) {
+-      this.system.needsRedraw = true;
+-      requestAnimationFrame(() => this.system.animate());
+-    }
++    this.currentModule.setDirty?.(true);
++    this.system.forceRedraw?.();
+ 
+-    this.system.showNotification(`↺ Panel color reset to default`);
++    this.system.showNotification(localize({en:'↺ Panel color reset to default',zh:'↺ 面板颜色已重置',ru:'↺ Восстановлен цвет панели по умолчанию'}));
+ 
+     setTimeout(() => {
+       this._changingColor = false;
+@@ -440,7 +492,7 @@ export class ModuleContextMenu {
+ 
+   deleteModule() {
+       if (this.system?.locked) {
+-          this.system.showNotification?.('🔒 Patch is locked');
++          this.system.showNotification?.(localize({"en":"🔒 Patch is locked","zh":"🔒 补丁已锁定","ru":"🔒 Патч заблокирован"}));
+           return;
+       }
+       if (!this.currentModule) return;
+@@ -486,4 +538,4 @@ export class ModuleContextMenu {
+         `;
+     document.head.appendChild(style);
+   }
+-}
+\ No newline at end of file
++}
+diff --git a/src/utils/locale.js b/src/utils/locale.js
+new file mode 100644
+index 0000000..a41e941
+--- /dev/null
++++ b/src/utils/locale.js
+@@ -0,0 +1,18 @@
++// Grain library interface languages follow the preferred browser/system locale.
++const supported = new Set(['zh', 'ru', 'en']);
++
++export function getUiLanguage(languages = undefined) {
++    const preferences = languages ?? (typeof navigator !== 'undefined'
++        ? [...(navigator.languages || []), navigator.language]
++        : []);
++    for (const preference of Array.isArray(preferences) ? preferences : [preferences]) {
++        const code = String(preference || '').toLowerCase().split(/[-_]/, 1)[0];
++        if (supported.has(code)) return code;
++    }
++    return 'en';
++}
++
++export function localize(text, language = getUiLanguage()) {
++    if (!text || typeof text !== 'object' || Array.isArray(text)) return text ?? '';
++    return text[language] ?? text.en ?? text.zh ?? text.ru ?? '';
++}
+diff --git a/vite.config.js b/vite.config.js
+index 0db10a2..09bdc26 100644
+--- a/vite.config.js
++++ b/vite.config.js
+@@ -70,7 +70,7 @@ function stableModulesOnly() {
+         for (const file of fs.readdirSync(modulesSrc)) {
+           if (!file.endsWith('.js')) continue
+           const code = fs.readFileSync(path.join(modulesSrc, file), 'utf-8')
+-          const m = code.match(/\bstatus\s*:\s*['"](\w+)['"]/)
++          const m = code.match(/\bstatus["']?\s*:\s*['"](\w+)['"]/)
+           const status = m ? m[1] : 'dev'
+           if (SHIP_STATUSES.includes(status)) {
+             kept.push(file.replace(/\.js$/, ''))
+@@ -106,9 +106,13 @@ function stableModulesOnly() {
+           }
+         }
+ 
+-        const metaSrc = path.join(libSrc, 'meta.json')
++        const metaSrc = path.join(libSrc, '_meta.json')
+         if (fs.existsSync(metaSrc)) {
+-          fs.copyFileSync(metaSrc, path.join(DST, libName, 'meta.json'))
++          fs.copyFileSync(metaSrc, path.join(DST, libName, '_meta.json'))
++        }
++        for (const name of ['README.md', 'README.zh-CN.md', 'README.ru.md', 'SOURCES.md', 'LICENSE']) {
++          const source = path.join(libSrc, name)
++          if (fs.existsSync(source)) fs.copyFileSync(source, path.join(DST, libName, name))
+         }
+ 
+         // Переписываем <lib>/_index.json с отфильтрованным списком
+@@ -185,4 +189,4 @@ export default defineConfig(({ mode }) => ({
+   },
+ 
+   publicDir: 'public'
+-}))
+\ No newline at end of file
++}))
+diff --git a/src/components/Panel.js b/src/components/Panel.js
+index 89c908e..9492962 100644
+--- a/src/components/Panel.js
++++ b/src/components/Panel.js
+@@ -101,7 +101,9 @@ export class Panel {
+     ctx.globalAlpha = this.opacity;
+ 
+     // === ФОН ПАНЕЛИ ===
+-    if (isLcd) {
++    if (this.customColor) {
++      ctx.fillStyle = this.customColor;
++    } else if (isLcd) {
+       ctx.fillStyle = theme.getSurfaceColor();
+     } else {
+       const bgColor = this.customColor || this.defaultColor || '#606060';

@@ -1,0 +1,45 @@
+import { chromium } from 'playwright-core';
+import { preview } from 'vite';
+import assert from 'node:assert/strict';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
+const host=resolve(root,'../csmodular-main');
+const server=await preview({root:host,configFile:resolve(host,'vite.config.js'),preview:{port:0,host:'127.0.0.1'},logLevel:'error'});
+const browser=await chromium.launch({executablePath:process.env.CHROME_PATH,headless:true});
+try {
+ const page=await browser.newPage({viewport:{width:1440,height:1000}});
+ const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ await page.goto(server.resolvedUrls.local[0]);
+ await page.waitForFunction(()=>window.system?.csoundGen);
+ await page.locator('#splash-root input[type=checkbox]').uncheck();await page.keyboard.press('Escape');
+ await page.waitForFunction(()=>!document.querySelector('#splash-root'));
+ await page.evaluate(async()=>{await window.system.loadPatchFromJson({modules:[],cables:[]});window.system.locked=false;window.system.offsetX=0;window.system.offsetY=0;});
+ await page.mouse.move(900,400);await page.mouse.down();await page.mouse.move(1100,550,{steps:5});await page.mouse.up();
+ assert.deepEqual(await page.evaluate(()=>[window.system.offsetX,window.system.offsetY,window.system.isPanning]),[200,150,false]);
+ await page.mouse.move(1000,450);await page.mouse.down({button:'middle'});await page.mouse.move(900,400,{steps:3});await page.mouse.up({button:'middle'});
+ assert.deepEqual(await page.evaluate(()=>[window.system.offsetX,window.system.offsetY]),[100,100]);
+ await page.mouse.move(1000,450);await page.mouse.down();
+ await page.evaluate(()=>window.dispatchEvent(new MouseEvent('mouseup',{clientX:1500,clientY:500,button:0})));
+ assert.equal(await page.evaluate(()=>window.system.isPanning),false);
+ const positions=await page.evaluate(async()=>{
+  const s=window.system;
+  await s.addNewModuleAtPosition('GrainOsc','voice',-500,-500,{library:'granular'});
+  await s.addNewModuleAtPosition('GrainFreeze','fx',600,-600,{library:'granular'});
+  await s.addNewModuleAtPosition('GrainSample','voice',1000,1000,{library:'granular'});
+  s.forceRedraw();
+  const osc=s.components.find(p=>p.jsonName==='GrainOsc');
+  // Use the same drag path as pointer input, well beyond the former 80-cell limit.
+  osc.isDragging=true;osc.dragOffsetGridX=0;osc.dragOffsetGridY=0;
+  osc.handlePanelDrag(-20000,-30000,s);osc.isDragging=false;
+  const modules=s.collectModulesForExport();
+  const before=modules.map(m=>[m.name,m.hpos,m.vpos]);
+  await s.loadPatchFromJson({modules,cables:[]});
+  const after=s.collectModulesForExport().map(m=>[m.name,m.hpos,m.vpos]);
+  return {before,after};
+ });
+ assert.deepEqual(positions.before,[['GrainOsc',-1000,-2000],['GrainFreeze',600,-600],['GrainSample',1000,1000]]);
+ assert.deepEqual(positions.after,positions.before,'World coordinates survive save/reload for Voice and FX');
+ assert.deepEqual(errors,[]);
+ console.log('Blank-space/middle panning, outside release, distant/negative placement, drag and Voice/FX save-reload passed.');
+} finally {await browser.close();await new Promise(r=>server.httpServer.close(r));}

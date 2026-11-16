@@ -1,0 +1,95 @@
+{
+  "filename": "granular-demo.json",
+  "modules": [
+    {
+      "name": "GrainOsc",
+      "library": "granular",
+      "id": 1,
+      "type": 0,
+      "parameters": "[0,24,80,32,8,0,0,0,64,64,0,127,90,1,0]",
+      "modes": [],
+      "area": "VOICE",
+      "hpos": 2,
+      "vpos": 4
+    },
+    {
+      "name": "GrainFreeze",
+      "library": "granular",
+      "id": 2,
+      "type": 0,
+      "parameters": "[0,24,80,32,8,0,0,0,64,64,0,127,90,1]",
+      "modes": [],
+      "area": "VOICE",
+      "hpos": 17,
+      "vpos": 4
+    },
+    {
+      "name": "Outs2",
+      "library": "my-lib",
+      "id": 3,
+      "type": 0,
+      "parameters": "[0,0,0,1]",
+      "modes": [],
+      "area": "VOICE",
+      "hpos": 32,
+      "vpos": 12
+    },
+    {
+      "name": "GrainSample",
+      "library": "granular",
+      "id": 4,
+      "type": 0,
+      "parameters": "[0,24,80,32,8,0,0,0,64,64,0,127,90,1,1,0]",
+      "modes": [],
+      "area": "VOICE",
+      "hpos": 32,
+      "vpos": 17
+    }
+  ],
+  "cables": [
+    {
+      "from": {
+        "id": 1,
+        "jack": 0,
+        "pin": "out"
+      },
+      "to": {
+        "id": 2,
+        "jack": 0,
+        "pin": "in"
+      },
+      "type": "out-in",
+      "area": "VOICE"
+    },
+    {
+      "from": {
+        "id": 2,
+        "jack": 0,
+        "pin": "out"
+      },
+      "to": {
+        "id": 3,
+        "jack": 0,
+        "pin": "in"
+      },
+      "type": "out-in",
+      "area": "VOICE"
+    },
+    {
+      "from": {
+        "id": 2,
+        "jack": 1,
+        "pin": "out"
+      },
+      "to": {
+        "id": 3,
+        "jack": 1,
+        "pin": "in"
+      },
+      "type": "out-in",
+      "area": "VOICE"
+    }
+  ],
+  "stickers": [],
+  "textpad": "Grain Osc -> Grain Freeze -> Outs2. Grain Sample: right-click to load a WAV into its selected slot. Connect its L/R to Outs2 to audition it."
+}
