@@ -31,9 +31,9 @@ for (const name of names) {
         : live ? controls
             : [...controls, ['Wave', copy('Waveform', '波形', 'Форма волны'), 0, 3, 0, 0]];
     const source = live ? copy('LIVE: connect audio first', '实时处理：先连接音频输入', 'Вход: подключите звук') : sample ? copy('FILE: right-click → Load WAV', '文件播放：右键 → 导入 WAV', 'Файл: ПКМ → загрузить WAV') : copy('WAVE: 0 sine · 1 tri · 2 saw · 3 square', '波形：0 正弦 · 1 三角 · 2 锯齿 · 3 方波', 'Волна: 0 син · 1 треуг · 2 пила · 3 меандр');
-    const hint = live ? copy('Record, then Freeze · right-click: help','先录入再冻结 · 右键查看说明','Запись → заморозка · ПКМ: справка')
-        : sample ? copy('Empty slot is silent · right-click: help','空槽无声 · 右键查看说明','Пустой слот молчит · ПКМ: справка')
-            : copy('Pitch 0 = 220 Hz (A3) · right-click: help','音高 0 = 220 Hz（A3）· 右键查看说明','Высота 0 = 220 Гц (A3) · ПКМ: справка');
+    const hint = live ? copy('Record, then Freeze','先录入再冻结','Запись → заморозка')
+        : sample ? copy('Empty slot is silent','空槽无声','Пустой слот молчит')
+            : copy('Pitch 0 = 220 Hz (A3)','音高 0 = 220 Hz（A3）','Высота 0 = 220 Гц (A3)');
     const components = [{componentType:'TextLabel',id:'900',x:12,y:25,text:source.en,textI18n:source,fontSize:10},
         {componentType:'TextLabel',id:'901',x:12,y:40,text:hint.en,textI18n:hint,fontSize:9}];
     // Keep parameter and jack IDs in their original order; only visual positions change.
@@ -42,21 +42,24 @@ for (const name of names) {
         ? [['Freeze','Position','PosJitter'], ['Density','Size','Window'], ['Pitch','PitchJitter','Seed'], ['Mix','Spread','Level'], ['Pan']]
         : sample
             ? [['Slot','Position','Scan'], ['Density','Size','Pitch'], ['Window','PosJitter','PitchJitter'], ['Pan','Spread','Level'], ['Freeze','Mix','Seed']]
-            : [['Wave','Pitch','Density'], ['Size','Window','PosJitter'], ['PitchJitter','Seed'], ['Pan','Spread','Level'], ['Position','Freeze','Mix']];
+            : [['Wave','Position','Pitch'], ['Density','Size','Window'], ['PosJitter','PitchJitter','Seed'], ['Pan','Spread','Level'], ['Freeze','Mix']];
     const rowY = [86,174,231,323,414];
     const randomness = copy('2 · Shape & randomness','2 · 颗粒塑形与随机','2 · Форма и случайность');
     const sections = [
         [64, live ? copy('1 · Record & freeze','1 · 录入与冻结','1 · Запись и захват') : sample ? copy('1 · WAV source','1 · WAV 文件声源','1 · Источник WAV') : copy('1 · Tone','1 · 音色','1 · Тон')],
         [152, randomness],
         [301, live ? copy('3 · Mix & output','3 · 混合与输出','3 · Микс и выход') : copy('3 · Stereo output','3 · 立体声输出','3 · Стереовыход')],
-        [392, live ? copy('Advanced · stereo centre','进阶 · 声像中心','Далее · центр панорамы') : sample ? copy('Advanced · hold & dry input','进阶 · 锁定与干声混合','Далее · фиксация и микс') : copy('Advanced · rarely needed','进阶 · 通常不用动','Далее · редко нужно')],
+        [392, live ? copy('Advanced · stereo centre','进阶 · 声像中心','Далее · центр панорамы') : copy('Advanced · hold & dry input','进阶 · 锁定与干声混合','Далее · фиксация и микс')],
     ];
     sections.forEach(([y,label],i)=>components.push({componentType:'TextLabel',id:String(910+i),x:12,y,text:label.en,textI18n:label,fontSize:11}));
     params.forEach(([key, baseLabel, min, max, value], n) => {
         let label = baseLabel;
-        if (key === "Freeze" && !live) label = copy("Hold position", "锁定位置", "Фикс. позицию");
-        if (key === "Position") label = live ? copy("Lookback", "回看位置", "В прошлое") : sample ? copy("Sample position", "采样位置", "Позиция файла") : copy("Phase (unused)", "相位（无效果）", "Фаза (без эфф.)");
-        // The jitter control randomises whatever Position means for this source.
+        // A new Grain Osc must start as the plain wave it names: warp depth and start-phase jitter default to 0.
+        // (Sample and Freeze keep 32 / 8, where these knobs mean a source position.)
+        if (!live && !sample && (key === 'Position' || key === 'PosJitter')) value = 0;
+        if (key === "Freeze" && !live) label = sample ? copy("Hold position", "锁定位置", "Фикс. позицию") : copy("Hold warp", "锁定扭曲", "Фикс. деформ.");
+        if (key === "Position") label = live ? copy("Lookback", "回看位置", "В прошлое") : sample ? copy("Sample position", "采样位置", "Позиция файла") : copy("Phase warp", "相位扭曲", "Деформ. фазы");
+        // Position jitter varies the grain start on all three sources.
         if (key === "PosJitter") label = live ? copy("Lookback jitter", "回看抖动", "Разброс назад") : sample ? copy("Position jitter", "位置抖动", "Разброс поз.") : copy("Phase jitter", "相位抖动", "Разброс фазы");
         if (key === "Pitch" && !live && !sample) label = copy("Pitch st (0=A3)", "音高（0=A3）", "Высота (0=A3)");
         if (key === "Mix") label = live ? copy("Dry/wet", "干湿比", "Сухой/влажн.") : copy("Grain/dry mix", "颗粒/干声比", "Гран./сухой");
@@ -67,7 +70,7 @@ for (const name of names) {
         const items = key === 'Window' ? copy('Hann,Triangle','汉宁窗,三角窗','Ханн,Треуг.') : live ? copy('Record,Freeze','录入,冻结','Запись,Стоп') : copy('Follow,Hold','跟随,锁定','Следить,Фикс.');
         components.push(selector
             ? {componentType:'ButtonIncDec',id:String(n+1),x,y:y+20,width:57,items:items.en,itemsI18n:items,initialIndex:value,binaryThreshold:true,csoundName:key}
-            : {componentType:'Knob',id:String(n+1),x,y:y+14,size:'medium',min,max,defaultValue:value,csoundName:key});
+            : {componentType:'Knob',id:String(n+1),x,y:y+14,size:'medium',min,max,defaultValue:value,csoundName:key === 'Position' && !live && !sample ? 'PhaseWarp' : key});
         components.push({ componentType: 'TextLabel', id: String(300 + n), x, y,
             text: label.en, textI18n: label, fontSize: 9 });
         if (n < 12) components.push({ componentType: 'Input', id: String(102 + n),
@@ -92,9 +95,9 @@ for (const name of names) {
         : sample ? copy('Plays a loaded WAV as grains. Right-click to load a WAV into the selected slot; an empty slot is silent. Scan moves the position through the file by itself (percent of the file per second; Hold pauses it). Up to 64 grains at once. Small jacks beside knobs add modulation.',
             '把导入的 WAV 切成颗粒播放。右键把 WAV 导入当前采样槽；空槽没有声音。“扫描”让位置自动在文件中移动（每秒走过文件的百分比；“锁定位置”会暂停它）。最多同时 64 个颗粒；旋钮旁的小插孔可叠加调制。',
             'Воспроизводит загруженный WAV гранулами. ПКМ — загрузить WAV в выбранный слот; пустой слот молчит. «Скан.» сам двигает позицию по файлу (% файла в секунду; фиксация его останавливает). До 64 гранул одновременно. Малые гнёзда рядом с регуляторами принимают модуляцию.')
-            : copy('Grain generator with a built-in wave (sine, triangle, saw or square), no input needed. Pitch 0 = 220 Hz (A3). Grains/s sets the grain rate, Size their length. Up to 64 grains at once. Small jacks beside knobs add modulation.',
-                '内置波形（正弦、三角、锯齿、方波）的颗粒发生器，无需输入。音高 0 = 220 Hz（A3）；颗粒/秒决定颗粒速率，粒长决定每颗粒时长。最多同时 64 个颗粒；旋钮旁的小插孔可叠加调制。',
-                'Генератор гранул со встроенной волной (синус, треугольник, пила, меандр), вход не нужен. Высота 0 = 220 Гц (A3). Плотность — частота гранул, длина — их длительность. До 64 гранул одновременно. Малые гнёзда рядом с регуляторами принимают модуляцию.');
+            : copy('Grain generator with a built-in wave (sine, triangle, saw or square), no input needed. Pitch 0 = 220 Hz (A3). Phase warp reshapes phase progression within each cycle and changes harmonic balance; 0 leaves the selected wave unchanged. Phase jitter varies the starting phase of each grain, with Seed setting the repeatable sequence. Up to 64 grains at once. Small jacks beside knobs add modulation.',
+                '内置波形（正弦、三角、锯齿、方波）的颗粒发生器，无需输入。音高 0 = 220 Hz（A3）。相位扭曲会在每个周期内改变相位推进速度并重塑谐波；0 保持所选波形不变。相位抖动会改变每个颗粒在波表中的起始相位，Seed 决定可重复的随机序列。最多同时 64 个颗粒；旋钮旁的小插孔可叠加调制。',
+                'Генератор гранул со встроенной волной (синус, треугольник, пила, меандр), вход не нужен. Высота 0 = 220 Гц (A3). Деформация фазы меняет её ход внутри каждого цикла и перераспределяет гармоники; 0 оставляет выбранную волну без изменений. Разброс фазы меняет начальную фазу для каждой гранулы, а Seed задаёт повторяемую последовательность. До 64 гранул одновременно. Малые гнёзда рядом с регуляторами принимают модуляцию.');
     const def = { type: name, displayName: displayName.en, displayNameI18n: displayName,
         category: live ? 'fx' : sample ? 'sample' : 'osc',
         status: 'passable', gridHeight: 35, originalName: name, defaultParams: [],
@@ -147,5 +150,5 @@ const module = (name, id, x, y, values) => ({ name, library: name.startsWith('Gr
 const cable = (from, output, to, input) => ({ from: { id: from, jack: output, pin: 'out' }, to: { id: to, jack: input, pin: 'in' }, type: 'out-in', area: 'VOICE' });
 const defaults = [0, ...controls.map(c => c[4])];
 await writeFile(resolve(root, 'examples/granular-demo.json'), JSON.stringify({ filename: 'granular-demo.json',
-    modules: [module('GrainOsc',1,2,4,[...defaults,0]), module('GrainFreeze',2,17,4,defaults), module('Outs2',3,32,12,[0,0,0,1]), module('GrainSample',4,32,17,[...defaults,1,0])],
+    modules: [module('GrainOsc',1,2,4,[...defaults.map((v, i) => (i === 3 || i === 4 ? 0 : v)), 0]), module('GrainFreeze',2,17,4,defaults), module('Outs2',3,32,12,[0,0,0,1]), module('GrainSample',4,32,17,[...defaults,1,0])],
     cables: [cable(1,0,2,0),cable(2,0,3,0),cable(2,1,3,1)], stickers: [], textpad: 'Grain Osc -> Grain Freeze -> Outs2. Grain Sample: right-click to load a WAV into its selected slot. Connect its L/R to Outs2 to audition it.' }, null, 2) + '\n');

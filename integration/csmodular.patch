@@ -236,10 +236,10 @@ index 0965e9f..b4977b1 100644
 +}
 diff --git a/src/csound/GrainSamples.js b/src/csound/GrainSamples.js
 new file mode 100644
-index 0000000..90ec074
+index 0000000..db7d93f
 --- /dev/null
 +++ b/src/csound/GrainSamples.js
-@@ -0,0 +1,93 @@
+@@ -0,0 +1,102 @@
 +import { localize } from '../utils/locale.js';
 +// File transport and metadata validation only. Csound decodes and processes audio.
 +export class GrainSamples {
@@ -311,9 +311,18 @@ index 0000000..90ec074
 +    async upload(csound) {
 +        let paths = this.uploaded.get(csound);
 +        if (!paths) { paths = new Set(); this.uploaded.set(csound, paths); }
++        // reset() retains files. Remove superseded revisions before writing the next bank.
++        const active = new Set(Array.from(this.slots.values(), entry => entry.path));
++        for (const path of paths) {
++            if (!active.has(path)) {
++                await csound.fs.unlink(path);
++                paths.delete(path);
++            }
++        }
 +        for (const { path, bytes } of this.slots.values()) {
 +            // reset() preserves the virtual filesystem. beta33 must not overwrite files.
 +            if (paths.has(path)) continue;
++            // beta33 reports only the last buffer size to GEN01 after appendFile.
 +            await csound.fs.writeFile(path, bytes);
 +            paths.add(path);
 +        }
@@ -333,125 +342,48 @@ index 0000000..90ec074
 +        return lines.join('\n');
 +    }
 +}
-diff --git a/src/ui/GranularGuide.js b/src/ui/GranularGuide.js
-new file mode 100644
-index 0000000..7bbdd4c
---- /dev/null
-+++ b/src/ui/GranularGuide.js
-@@ -0,0 +1,81 @@
-+import { localize } from '../utils/locale.js';
-+const t = (en, zh, ru) => localize({ en, zh, ru });
-+
-+// One reusable guide for the whole application and each granular module.
-+export function installGranularGuide(system) {
-+    if (document.getElementById('granular-guide-open')) return;
-+    const style = document.createElement('style');
-+    style.textContent = `
-+      #granular-guide-open { position:fixed;right:16px;top:12px;z-index:9000;padding:9px 14px;background:#253847;color:#fff;border:1px solid #708b9f;border-radius:4px;cursor:pointer;font:inherit; }
-+      #granular-guide { box-sizing:border-box;margin:auto;width:min(680px,calc(100vw - 32px));max-height:85vh;overflow:auto;padding:24px;background:#25292d;color:#f2f4f6;border:1px solid #71818d;border-radius:6px;font:15px/1.65 system-ui,sans-serif; }
-+      #granular-guide::backdrop {background:rgba(0,0,0,.65)}
-+      #granular-guide h2 {margin:0 0 16px;font-size:24px} #granular-guide h3 {margin:22px 0 8px;font-size:18px}
-+      #granular-guide ol {padding-left:24px} #granular-guide p {margin:8px 0} #granular-guide li {margin:8px 0} #granular-guide summary {cursor:pointer;font-weight:600;padding:10px 0}
-+      #granular-guide button {padding:9px 14px;background:#344b5e;color:#fff;border:1px solid #8298a9;border-radius:4px;font:inherit;cursor:pointer}
-+      #granular-guide button:focus-visible,#granular-guide summary:focus-visible,#granular-guide-open:focus-visible {outline:3px solid #a9d9ff;outline-offset:3px}
-+      #granular-guide .guide-actions {display:flex;gap:12px;flex-wrap:wrap;margin:18px 0}
-+      #granular-guide [role=status] {color:#ffe0a3}
-+    `;
-+    document.head.append(style);
-+    const open = document.createElement('button');
-+    open.id = 'granular-guide-open';
-+    open.textContent = t('Start here', '入门指南', 'Начать здесь');
-+    open.onclick = () => showGranularGuide(system);
-+    document.body.append(open);
-+}
-+
-+export function showGranularGuide(system, moduleName = '') {
-+    document.getElementById('granular-guide')?.remove();
-+    const dialog = document.createElement('dialog');
-+    dialog.id = 'granular-guide';
-+    dialog.setAttribute('aria-labelledby','granular-guide-title');
-+    const add = (tag, text, parent = dialog) => { const el=document.createElement(tag);el.textContent=text;parent.append(el);return el; };
-+    add('h2', t('Your first sound', '从零开始，让它发声', 'Ваш первый звук')).id='granular-guide-title';
-+    add('p', t('A patch is a set of modules connected by cables. A source makes sound; Outs2 sends it to your speakers.', '一个“音色工程”由模块和连线组成。声源模块产生声音，Outs2 输出模块把声音送到扬声器。只有声源，没有连接到 Outs2，也听不到声音。', 'Патч — это модули, соединённые кабелями. Источник создаёт звук, а Outs2 выводит его на динамики.'));
-+    const steps=add('ol','');
-+    for(const text of [
-+        t('Load the starter below. It connects Grain Osc → Outs2; no WAV or microphone is needed.', '点击下方“加载发声示例”。它已经连好“颗粒振荡器 → Outs2”，不需要 WAV 文件或麦克风。', 'Загрузите пример ниже: Grain Osc → Outs2. Файл WAV и микрофон не нужны.'),
-+        t('Lower your speaker volume, then press ▶ in the bottom bar. Press ■ to stop.', '先调低扬声器音量，再点击底栏的 ▶ 开始播放；点击 ■ 停止。', 'Уменьшите громкость динамиков и нажмите ▶ на нижней панели. Кнопка ■ останавливает звук.'),
-+        t('Drag Pitch up/down to hear the note change. Then try Grain Size and Density, one at a time.', '按住“音高”旋钮上下拖动，听音高变化。再分别试“粒长”和“颗粒/秒”，一次只改一个参数。', 'Перетаскивайте регулятор высоты вверх/вниз. Затем попробуйте длительность и плотность гранул по одному.')
-+    ])add('li',text,steps);
-+    const actions=add('div','');actions.className='guide-actions';
-+    const load=add('button',t('Load starter patch','加载发声示例','Загрузить пример'),actions);
-+    const close=add('button',t('Close guide','关闭指南','Закрыть'),actions);close.onclick=()=>dialog.close();
-+    const status=add('p','');status.setAttribute('role','status');
-+    load.onclick=async()=>{
-+        if(system.locked){status.textContent=t('Unlock the patch first using the lock control in the bottom bar.','请先通过底栏的锁定按钮解锁工程。','Сначала разблокируйте патч кнопкой замка на нижней панели.');return;}
-+        if(system.components?.length && !confirm(t('Replace the current patch? Save your work first.','示例会替换当前工程。请先保存现有工程，是否继续？','Заменить текущий патч? Сначала сохраните свою работу.')))return;
-+        load.disabled=true;
-+        try{
-+            await system.csoundEngine?.stop();
-+            const response=await fetch('/patches/granular-demo.json');if(!response.ok)throw Error('demo');
-+            const patch=await response.json();
-+            patch.modules=patch.modules.filter(m=>m.name==='GrainOsc'||m.name==='Outs2');
-+            patch.modules.forEach(m=>{m.hpos=m.name==='GrainOsc'?2:17;m.vpos=4;});
-+            const osc=patch.modules.find(m=>m.name==='GrainOsc'),out=patch.modules.find(m=>m.name==='Outs2');
-+            patch.cables=[0,1].map(jack=>({from:{id:osc.id,jack,pin:'out'},to:{id:out.id,jack,pin:'in'},type:'out-in',area:'VOICE'}));
-+            patch.textpad='Grain Osc L/R -> Outs2 L/R';
-+            const result=await system.loadPatchFromJson(patch);
-+            if(result===false||result?.success===false)throw Error('load');
-+            dialog.close();system.showNotification(t('Starter connected. Press ▶ in the bottom bar to hear it.','发声示例已连接。点击底栏 ▶ 开始播放。','Пример подключён. Нажмите ▶ на нижней панели.'));
-+        }catch{status.textContent=t('Could not load the example. Check that the granular library is installed.','示例加载失败，请检查颗粒模块库是否已安装。','Не удалось загрузить пример. Проверьте установку библиотеки.');}
-+        finally{load.disabled=false;}
-+    };
-+    add('h3',t('Which module do I use?','三个模块怎么选？','Какой модуль выбрать?'));
-+    const sections = [
-+        ['GrainOsc',t('Grain Osc — sound without a file','颗粒振荡器：不用文件就能发声','Grain Osc — звук без файла'),t('Built-in wave: Waveform 0 sine, 1 triangle, 2 saw, 3 square; Pitch 0 = 220 Hz (A3). Connect L/R to Outs2. The optional dry input is unnecessary for your first sound. Phase jitter and Pitch jitter make the tone rougher or detuned. Phase and Hold position (under Advanced) have no audible effect on a periodic wave; they stay so that older patches still load.', '内置波形：“波形”0 正弦、1 三角、2 锯齿、3 方波；音高 0 = 220 Hz（A3）。左右输出接到 Outs2 即可，第一次使用不用连接“干声输入”。“相位抖动”和“音高抖动”会让音色变粗糙或带失谐感。“相位”和“锁定位置”（在“进阶”区）对周期波形没有听感影响，保留它们是为了让旧工程仍能加载。', 'Встроенная волна: «Форма волны» 0 синус, 1 треугольник, 2 пила, 3 меандр; высота 0 = 220 Гц (A3). Подключите Л/П к Outs2. Сухой вход необязателен. «Разброс фазы» и «Разброс высоты» делают тон грубее или расстроеннее. «Фаза» и фиксация (раздел «Далее») на периодическую волну не влияют; они оставлены для совместимости со старыми патчами.')],
-+        ['GrainSample',t('Grain Sample — play your WAV','颗粒采样：播放你的 WAV 文件','Grain Sample — ваш файл WAV'),t('Select a slot (1–8), right-click the module → Load WAV, then connect L/R to Outs2. Empty slots are silent. Sample position chooses a point in the file and Position jitter scatters it. Scan moves the position through the file by itself (percent of the file per second, negative = backwards); Hold position pauses the scan and ignores Position changes while on. Reload the WAV after refreshing the app.', '选择采样槽（1–8），右键模块 → 导入 WAV，再把左右输出接到 Outs2。空槽没有声音。“采样位置”决定读取文件的哪一段，“位置抖动”让它随机散开。“扫描”让位置自动在文件中移动（每秒走过文件的百分比，负数为倒走）；“锁定位置”开启后会暂停扫描并忽略位置变化。刷新应用后需重新导入文件。', 'Выберите слот 1–8, ПКМ по модулю → Загрузить WAV, затем Л/П → Outs2. Пустой слот молчит. Позиция выбирает участок файла, «Разброс поз.» рассеивает его. «Скан.» сам двигает позицию по файлу (% файла в секунду, минус — назад); фиксация останавливает скан и игнорирует изменения позиции. После обновления страницы загрузите файл снова.')],
-+        ['GrainFreeze',t('Grain Freeze — capture another module','颗粒冻结：抓取其他模块的声音','Grain Freeze — захват звука'),t('Connect Grain Osc L → Audio in, then L/R → Outs2. Leave Record on for a few seconds; select Freeze to stop recording and play the captured buffer. An empty frozen buffer is silent. Lookback selects older recorded audio, up to about 4 seconds back.', '先接“颗粒振荡器左输出 → 音频输入”，再把本模块左右输出接到 Outs2。保持“录入”几秒，然后切到“冻结”，就会停止录入并反复读取缓冲里的声音。空缓冲直接冻结不会发声。“回看位置”选择更早录入的声音，最多回看约 4 秒。', 'Подключите Grain Osc Л → аудиовход, затем Л/П → Outs2. Запишите несколько секунд и включите заморозку. Пустой замороженный буфер молчит. Позиция выбирает более раннюю запись, до ~4 с назад.')],
-+    ];
-+    for(const [name,title,body]of sections){const detail=add('details','');detail.open=name===moduleName;add('summary',title,detail);add('p',body,detail);}
-+    add('h3',t('Shared controls','为什么有相同的控制？','Общие регуляторы'));
-+    add('p',t('All three cut their source into short grains. Density is grains per second; Size is each grain’s duration. Pitch changes playback rate. Jitter adds random offsets; Spread widens the stereo image. Start with the defaults.', '三者都把各自的声源切成短小的“颗粒”，所以共享颗粒参数：颗粒/秒控制数量，粒长控制每颗粒持续时间，音高改变播放速率，抖动加入随机变化，声像扩展让声音分布到左右两边。初学时保持默认值即可。', 'Все три создают короткие гранулы. Плотность — гранул в секунду, длина — длительность гранулы, высота — скорость чтения. Разброс добавляет случайность, панорама распределяет звук между каналами. Начните с настроек по умолчанию.'));
-+    add('p',t('At most 64 grains play at once. If Grains/s × Size (in seconds) is above 64, extra grains are skipped and the cloud gets thinner than the knobs suggest. Each panel follows the order you will use it: sections 1 and 2 make the sound, 3 sets the stereo output, Advanced holds rarely needed controls.', '最多同时播放 64 个颗粒：当“颗粒/秒 × 粒长（秒）”超过 64 时，多出的颗粒会被跳过，听起来比旋钮显示的稀疏。面板按使用顺序排列：1、2 区决定声音，3 区决定立体声输出，“进阶”区放不常用的控制。', 'Одновременно звучит не более 64 гранул: если «гранул/с × длина (с)» больше 64, лишние гранулы пропускаются и облако получается реже, чем показывают регуляторы. Панель устроена по порядку работы: разделы 1 и 2 формируют звук, 3 — стереовыход, «Далее» — редко нужные регуляторы.'));
-+    add('p',t('Grain window shapes each grain’s fade in/out: Hann is rounded, Triangle has straight slopes. Click the selector arrows to choose. It is unrelated to an application window. The mix knob (Dry/wet on Freeze, Grain/dry mix on Osc and Sample) at maximum is fully granular; at 0 you only hear the optional dry input. Seed is an advanced repeatability control.', '“颗粒包络”决定每个颗粒如何淡入和淡出：汉宁窗是圆滑曲线，三角窗是直线斜坡。点击选择器的小箭头切换。“窗”是音频术语，与软件窗口无关。混合旋钮（冻结模块叫“干湿比”，其余叫“颗粒/干声比”）拉满是纯颗粒声，0 只输出干声输入；随机种子是复现随机效果的进阶参数。', 'Окно гранулы задаёт нарастание и затухание: Ханн — плавная кривая, треугольное — прямые склоны. Переключайте стрелками. Микс на максимуме — только гранулы, 0 — только сухой вход. Seed нужен для повторяемой случайности.'));
-+    add('h3',t('Build and save your own patch','自己添加、连线和保存','Собрать и сохранить патч'));
-+    add('p',t('Space opens the module menu. Drag from an output jack to an input jack and release. Both modules must be in the same Voice/FX layer. Drag knobs vertically; Ctrl+wheel zooms and Space+drag pans. Use Save/Load in the main menu to keep your patch; WAV files must be reimported.', '空格键打开模块菜单。按住输出插孔，拖到目标输入插孔后松开即可连线；两个模块必须位于同一 Voice/FX 层。旋钮上下拖动调节；Ctrl+滚轮缩放，空格+拖动画布平移。通过主菜单 Save/Load 保存或打开工程，WAV 文件需要另行保留和重新导入。', 'Пробел открывает меню модулей. Перетащите кабель с выхода на вход. Оба модуля должны быть в одном слое Voice/FX. Регуляторы меняются вертикально; Ctrl+колесо — масштаб, пробел+перетаскивание — панорама. Save/Load сохраняет патч; WAV загрузите отдельно.'));
-+    add('h3',t('No sound?','没有声音时按这个顺序检查','Нет звука?'));
-+    add('p',t('Press ▶, check speaker volume, connect both outputs to Outs2, keep Density and Level above zero and the mix knob at maximum. Load a WAV for Sample; record before freezing for Freeze. Ignore the small modulation jacks until you are ready.', '先看是否已按 ▶、扬声器是否有音量；再看左右输出是否接到 Outs2，颗粒/秒和输出电平是否大于 0，混合旋钮是否拉满。采样模块要先导入 WAV，冻结模块要先录入声音。旋钮旁的小插孔是调制输入，初学时可以全部留空。', 'Нажмите ▶, проверьте громкость и соединения с Outs2. Плотность и уровень должны быть выше нуля, микс — на максимуме. Для Sample загрузите WAV; для Freeze сначала запишите звук. Малые входы модуляции можно оставить пустыми.'));
-+    dialog.addEventListener('keydown', e => e.stopPropagation());
-+    document.body.append(dialog);dialog.addEventListener('close',()=>dialog.remove());dialog.showModal();
-+}
-\ No newline at end of file
 diff --git a/src/ui/ModuleContextMenu.js b/src/ui/ModuleContextMenu.js
-index bc348fe..4af2767 100644
+index bc348fe..0485eda 100644
 --- a/src/ui/ModuleContextMenu.js
 +++ b/src/ui/ModuleContextMenu.js
 @@ -1,6 +1,8 @@
-+import { installGranularGuide, showGranularGuide } from './GranularGuide.js';
++import './module-menu.css';
++import { positionContextMenu } from './positionContextMenu.js';
  // src/ui/ModuleContextMenu.js
  import { ColorPicker } from './ColorPicker.js';
- import { injectColorPickerStyles } from './ColorPickerStyles.js';
+-import { injectColorPickerStyles } from './ColorPickerStyles.js';
 +import { localize } from '../utils/locale.js';
  const IS_DEV = import.meta.env.DEV;
  export class ModuleContextMenu {
    constructor(system) {
-@@ -8,6 +10,7 @@ export class ModuleContextMenu {
-     this.menuElement = null;
-     this.currentModule = null;
+@@ -10,42 +12,24 @@ export class ModuleContextMenu {
  
-+    installGranularGuide(system);
      this.createMenuElement();
      this.setupEventListeners();
-     this.injectStyles();
-@@ -20,7 +23,7 @@ export class ModuleContextMenu {
-     this.menuElement.style.cssText = `
-             position: fixed;
-             min-width: 150px;
+-    this.injectStyles();
+     ColorPicker.injectStyles();
+   }
+ 
+   createMenuElement() {
+     this.menuElement = document.createElement('div');
+     this.menuElement.id = 'module-context-menu';
+-    this.menuElement.style.cssText = `
+-            position: fixed;
+-            min-width: 150px;
 -            max-width: 170px;
-+            max-width: 290px;
-             background: #2a2a2a;
-             border: 1px solid #444;
-             border-radius: 6px;
-@@ -37,7 +40,7 @@ export class ModuleContextMenu {
+-            background: #2a2a2a;
+-            border: 1px solid #444;
+-            border-radius: 6px;
+-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+-            z-index: 15000;
+-            font-family: Arial, sans-serif;
+-            color: #ddd;
+-            display: none;
+-            overflow: hidden;
+-        `;
+-
+     document.body.appendChild(this.menuElement);
+   }
  
    show(module, x, y) {
      if (this.system?.locked) {
@@ -460,20 +392,78 @@ index bc348fe..4af2767 100644
        return;
      }
      this.currentModule = module;
-@@ -66,6 +69,51 @@ export class ModuleContextMenu {
+     this.updateMenuContent();
+ 
+-    this.menuElement.style.left = `${x}px`;
+-    this.menuElement.style.top = `${y}px`;
+-    this.menuElement.style.display = 'block';
++    positionContextMenu(this.menuElement, x, y);
+ 
+     if (this.system.contextMenu?.hide) this.system.contextMenu.hide();
+     if (this.system.jackContextMenu?.hide) this.system.jackContextMenu.hide();
+@@ -66,100 +50,64 @@ export class ModuleContextMenu {
      // === ЗАГОЛОВОК ===
      this.menuElement.appendChild(this.createHeader());
  
-+    if (['GrainOsc','GrainSample','GrainFreeze'].includes(this.currentModule.jsonName)) {
-+      const name = this.currentModule.jsonName;
-+      this.menuElement.appendChild(this.createMenuItem(localize({en:'How to use this module',zh:'如何使用这个模块',ru:'Как использовать модуль'}), () => showGranularGuide(this.system, name)));
-+    }
+-    // === LAYER SWITCHER ===
+-    const layerSection = document.createElement('div');
+-    layerSection.style.cssText = `
+-            padding: 6px 8px;
+-            border-bottom: 1px solid #333;
+-        `;
+-
+-    const layerTitle = document.createElement('div');
+-    layerTitle.style.cssText = `
+-            color: #aaa;
+-            font-size: 10px;
+-            margin-bottom: 4px;
+-        `;
+-    layerTitle.textContent = 'Layer:';
+-    layerSection.appendChild(layerTitle);
+-
+-    const layerButtons = document.createElement('div');
+-    layerButtons.style.cssText = `
+-            display: flex;
+-            gap: 6px;
+-        `;
+-
+-    const currentLayer = this.currentModule.layer || 'voice';
+-
+-    // Voice button
+-    const voiceBtn = document.createElement('button');
+-    voiceBtn.textContent = 'Voice';
+-    const isVoice = currentLayer === 'voice';
+-    voiceBtn.style.cssText = `
+-            flex: 1;
+-            padding: 5px 6px;
+-            background: ${isVoice ? '#0a3a5a' : '#2a2a2a'};
+-            border: 1px solid ${isVoice ? '#0af' : '#444'};
+-            color: ${isVoice ? '#0af' : '#aaa'};
+-            border-radius: 4px;
+-            cursor: pointer;
+-            font-size: 10px;
+-            letter-spacing: 0.2px;
+-            font-family: inherit;
+-            transition: all 0.15s;
+-        `;
+-    if (!isVoice) {
+-        voiceBtn.onmouseenter = () => {
+-            voiceBtn.style.background = '#3a3a3a';
+-            voiceBtn.style.borderColor = '#666';
+-        };
+-        voiceBtn.onmouseleave = () => {
+-            voiceBtn.style.background = '#2a2a2a';
+-            voiceBtn.style.borderColor = '#444';
+-        };
+-        voiceBtn.onclick = (e) => {
+-            e.stopPropagation();
+-            this.setLayer('voice');
 +    if (this.currentModule.jsonName === 'GrainSample') {
 +      const slotControl = this.currentModule.components.find(c => String(c.id) === '14');
 +      const slot = Math.max(1, Math.min(8, Math.round(slotControl?.value ?? 1)));
 +      const sample = this.system.csoundEngine.grainSamples.slots.get(slot);
 +      const info = document.createElement('div');
-+      info.style.cssText = 'padding:8px;font-size:11px;overflow-wrap:anywhere';
++      info.className = 'sample-info';
 +      const labels = {
 +        en: `Slot ${slot}: ${sample?.name || 'empty'} · kept for this session · stereo WAV uses its left channel`,
 +        zh: `采样槽 ${slot}：${sample?.name || '空'} · 仅保留在本次会话 · 立体声 WAV 使用左声道`,
@@ -504,42 +494,68 @@ index bc348fe..4af2767 100644
 +          } catch (error) {
 +            this.system.showNotification(error.message);
 +          }
-+        };
+         };
 +        input.click();
 +      }));
-+    }
-+
-     // === LAYER SWITCHER ===
-     const layerSection = document.createElement('div');
-     layerSection.style.cssText = `
-@@ -79,7 +127,7 @@ export class ModuleContextMenu {
-             font-size: 10px;
-             margin-bottom: 4px;
-         `;
--    layerTitle.textContent = 'Layer:';
-+    layerTitle.textContent = localize({"en":"Layer:","zh":"层：","ru":"Слой:"});
-     layerSection.appendChild(layerTitle);
+     }
  
-     const layerButtons = document.createElement('div');
-@@ -92,7 +140,7 @@ export class ModuleContextMenu {
+-    // FX button
+-    const fxBtn = document.createElement('button');
+-    fxBtn.textContent = 'FX';
+-    const isFx = currentLayer === 'fx';
+-    fxBtn.style.cssText = `
+-            flex: 1;
+-            padding: 5px 6px;
+-            background: ${isFx ? '#3a2a0a' : '#2a2a2a'};
+-            border: 1px solid ${isFx ? '#f59e0b' : '#444'};
+-            color: ${isFx ? '#f59e0b' : '#aaa'};
+-            border-radius: 4px;
+-            cursor: pointer;
+-            font-size: 10px;
+-            letter-spacing: 0.2px;
+-            font-family: inherit;
+-            transition: all 0.15s;
+-        `;
+-    if (!isFx) {
+-        fxBtn.onmouseenter = () => {
+-            fxBtn.style.background = '#3a3a3a';
+-            fxBtn.style.borderColor = '#666';
+-        };
+-        fxBtn.onmouseleave = () => {
+-            fxBtn.style.background = '#2a2a2a';
+-            fxBtn.style.borderColor = '#444';
+-        };
+-        fxBtn.onclick = (e) => {
+-            e.stopPropagation();
+-            this.setLayer('fx');
+-        };
++    // === LAYER SWITCHER ===
++    const layerSection = document.createElement('div');
++    layerSection.className = 'module-layers';
++    const layerTitle = document.createElement('span');
++    layerTitle.textContent = localize({en:'Layer', zh:'图层', ru:'Слой'});
++    layerSection.append(layerTitle);
++    const current = this.currentModule.layer || 'voice';
++    for (const [layer, label] of [['voice', localize({en:'Voice', zh:'声部', ru:'Голос'})], ['fx', 'FX']]) {
++      const button = document.createElement('button');
++      button.textContent = label;
++      button.setAttribute('aria-pressed', String(current === layer));
++      button.onclick = () => this.setLayer(layer);
++      layerSection.append(button);
+     }
++    this.menuElement.append(layerSection);
  
-     // Voice button
-     const voiceBtn = document.createElement('button');
--    voiceBtn.textContent = 'Voice';
-+    voiceBtn.textContent = localize({"en":"Voice","zh":"声部","ru":"Голос"});
-     const isVoice = currentLayer === 'voice';
-     voiceBtn.style.cssText = `
-             flex: 1;
-@@ -159,7 +207,7 @@ export class ModuleContextMenu {
-     layerSection.appendChild(layerButtons);
-     this.menuElement.appendChild(layerSection);
- 
+-    layerButtons.appendChild(voiceBtn);
+-    layerButtons.appendChild(fxBtn);
+-    layerSection.appendChild(layerButtons);
+-    this.menuElement.appendChild(layerSection);
+-
 -    // === PANEL COLOR (dev only — legacy Classic feature) ===
 +    // === PANEL COLOR (per-module override, both theme modes) ===
      if (IS_DEV) {
          const colorSection = document.createElement('div');
          colorSection.style.cssText = `
-@@ -173,7 +221,7 @@ export class ModuleContextMenu {
+@@ -173,7 +121,7 @@ export class ModuleContextMenu {
                  color: #aaa;
                  font-size: 10px;
              `;
@@ -548,7 +564,7 @@ index bc348fe..4af2767 100644
          colorSection.appendChild(colorTitle);
  
          if (!this.colorPicker) {
-@@ -182,7 +230,7 @@ export class ModuleContextMenu {
+@@ -182,7 +130,7 @@ export class ModuleContextMenu {
                  rows: 4,
                  cellSize: 14,
                  showReset: true,
@@ -557,35 +573,81 @@ index bc348fe..4af2767 100644
                  onSelect: (color) => this.changePanelColor(color),
                  onReset: () => this.resetPanelColor(),
              });
-@@ -203,7 +251,7 @@ export class ModuleContextMenu {
-     this.menuElement.appendChild(this.createSeparator());
+@@ -192,20 +140,20 @@ export class ModuleContextMenu {
+         } else {
+             colorSection.appendChild(this.colorPicker.element);
+ 
+-            const currentColor = this.currentModule.customColor || '#606060';
+-            this.colorPicker.setColor(currentColor);
++
+         }
+ 
++        this.colorPicker.setColor(this.currentModule.customColor);
+         this.menuElement.appendChild(colorSection);
+     }
+ 
+     // === DELETE ===
+-    this.menuElement.appendChild(this.createSeparator());
++
      this.menuElement.appendChild(
        this.createMenuItem(
 -        '🗑️ Delete Module',
-+        localize({"en":"🗑️ Delete Module","zh":"🗑️ 删除模块","ru":"🗑️ Удалить модуль"}),
++        localize({"en":"Delete module","zh":"删除模块","ru":"Удалить модуль"}),
          () => this.deleteModule(),
-         '#ff6b6b',
+-        '#ff6b6b',
++        'destructive',
        ),
-@@ -230,7 +278,7 @@ export class ModuleContextMenu {
+     );
+   }
+@@ -216,31 +164,13 @@ export class ModuleContextMenu {
  
-     // Название модуля (слева, синим)
+   createHeader() {
+     const header = document.createElement('div');
+-    header.style.cssText = `
+-            padding: 6px 8px;
+-            background: #333;
+-            color: #0af;
+-            font-size: 11px;
+-            border-bottom: 1px solid #444;
+-            font-weight: bold;
+-            display: flex;
+-            justify-content: space-between;
+-            align-items: center;
+-        `;
+-
+-    // Название модуля (слева, синим)
++    header.className = 'module-menu-title';
      const title = document.createElement('span');
 -    title.textContent = this.currentModule?.title || 'Module';
 +    title.textContent = this.currentModule?.title || localize({"en":"Module","zh":"模块","ru":"Модуль"});
  
      // ⭐ Категория (справа, серым) — вместо дублирующего jsonName
      const category = document.createElement('span');
-@@ -254,10 +302,15 @@ export class ModuleContextMenu {
+-    category.style.cssText = `
+-            font-size: 10px;
+-            color: #888;
+-            font-weight: normal;
+-            margin-left: 6px;
+-            white-space: nowrap;
+-        `;
++    category.className = 'module-category';
+     category.textContent = this._getModuleCategoryLabel();
+ 
+     header.appendChild(title);
+@@ -253,31 +183,27 @@ export class ModuleContextMenu {
+       const m = this.currentModule;
        if (!m) return '';
  
-       if (m.category) {
+-      if (m.category) {
 -          return m.category.charAt(0).toUpperCase() + m.category.slice(1);
++      const category = m.category || this.system.moduleFactory?.moduleRegistry[m.jsonName]?.category;
++      if (category) {
 +          const labels = {
 +              fx: { en: 'FX', zh: '效果', ru: 'Эффекты' },
 +              sample: { en: 'Sample', zh: '采样', ru: 'Сэмплы' },
 +              osc: { en: 'Oscillator', zh: '振荡器', ru: 'Осциллятор' },
 +          };
-+          return labels[m.category] ? localize(labels[m.category]) : m.category.charAt(0).toUpperCase() + m.category.slice(1);
++          return labels[category] ? localize(labels[category]) : category.charAt(0).toUpperCase() + category.slice(1);
        }
 -      if (m.isUser) return 'User';
 -      return 'Unknown';
@@ -594,8 +656,48 @@ index bc348fe..4af2767 100644
    }
  
    // ============================================================
-@@ -303,7 +356,7 @@ export class ModuleContextMenu {
+   //  ПУНКТЫ МЕНЮ
+   // ============================================================
  
+-  createMenuItem(text, onClick) {
+-    const item = document.createElement('div');
+-    item.style.cssText = `
+-            padding: 6px 8px;
+-            cursor: pointer;
+-            font-size: 11px;
+-            display: flex;
+-            align-items: center;
+-            gap: 6px;
+-        `;
+-    item.innerHTML = text;
+-
+-    item.onmouseenter = () => (item.style.background = '#3a3a3a');
+-    item.onmouseleave = () => (item.style.background = 'transparent');
++  createMenuItem(text, onClick, variant = '') {
++    const item = document.createElement('button');
++    item.className = 'module-action ' + variant;
++    item.textContent = text;
+     item.onclick = (e) => {
+       e.stopPropagation();
+       onClick();
+@@ -287,23 +213,9 @@ export class ModuleContextMenu {
+     return item;
+   }
+ 
+-  createSeparator() {
+-    const separator = document.createElement('div');
+-    separator.style.cssText = `
+-            height: 1px;
+-            background: #333;
+-            margin: 4px 0;
+-        `;
+-    return separator;
+-  }
+-
+-  // ============================================================
+-  //  LAYER
+-  // ============================================================
+-
    setLayer(newLayer) {
      if (this.system?.locked) {
 -      this.system.showNotification?.('🔒 Patch is locked');
@@ -603,7 +705,7 @@ index bc348fe..4af2767 100644
        return;
      }
      if (!this.currentModule) return;
-@@ -313,12 +366,12 @@ export class ModuleContextMenu {
+@@ -313,12 +225,12 @@ export class ModuleContextMenu {
  
      const cables = this.system.patchManager.findCablesByModule(this.currentModule.moduleId);
      if (cables.length > 0) {
@@ -622,7 +724,7 @@ index bc348fe..4af2767 100644
        if (!ok) return;
  
        cables.forEach(cable => {
-@@ -400,6 +453,7 @@ export class ModuleContextMenu {
+@@ -400,6 +312,7 @@ export class ModuleContextMenu {
      this._changingColor = true;
  
      this.currentModule.customColor = colorHex;
@@ -630,7 +732,7 @@ index bc348fe..4af2767 100644
  
      if (this.currentModule.layer === 'voice') {
          this.system._voiceDirty = true;
-@@ -407,7 +461,7 @@ export class ModuleContextMenu {
+@@ -407,7 +320,7 @@ export class ModuleContextMenu {
          this.system._fxDirty = true;
      }
      this.system.forceRedraw?.();
@@ -639,7 +741,7 @@ index bc348fe..4af2767 100644
  
      setTimeout(() => {
        this._changingColor = false;
-@@ -422,12 +476,10 @@ export class ModuleContextMenu {
+@@ -422,12 +335,10 @@ export class ModuleContextMenu {
  
      this.currentModule.customColor = null;
  
@@ -655,7 +757,7 @@ index bc348fe..4af2767 100644
  
      setTimeout(() => {
        this._changingColor = false;
-@@ -440,7 +492,7 @@ export class ModuleContextMenu {
+@@ -440,7 +351,7 @@ export class ModuleContextMenu {
  
    deleteModule() {
        if (this.system?.locked) {
@@ -664,10 +766,26 @@ index bc348fe..4af2767 100644
            return;
        }
        if (!this.currentModule) return;
-@@ -486,4 +538,4 @@ export class ModuleContextMenu {
-         `;
-     document.head.appendChild(style);
+@@ -470,20 +381,4 @@ export class ModuleContextMenu {
+     });
    }
+ 
+-  injectStyles() {
+-    if (document.getElementById('module-menu-styles')) return;
+-
+-    const style = document.createElement('style');
+-    style.id = 'module-menu-styles';
+-    style.textContent = `
+-            #module-context-menu div[style*="cursor: pointer"]:hover {
+-                background: #3a3a3a !important;
+-            }
+-
+-            #module-context-menu div[style*="cursor: pointer"]:active {
+-                background: #4a4a4a !important;
+-            }
+-        `;
+-    document.head.appendChild(style);
+-  }
 -}
 \ No newline at end of file
 +}
@@ -746,3 +864,143 @@ index 89c908e..9492962 100644
        ctx.fillStyle = theme.getSurfaceColor();
      } else {
        const bgColor = this.customColor || this.defaultColor || '#606060';
+diff --git a/src/ui/module-menu.css b/src/ui/module-menu.css
+new file mode 100644
+index 0000000..d00a5ca
+--- /dev/null
++++ b/src/ui/module-menu.css
+@@ -0,0 +1,33 @@
++#module-context-menu {
++  display: none;
++  position: fixed;
++  z-index: 15000;
++  width: min(17rem, calc(100vw - 16px));
++  box-sizing: border-box;
++  padding: 6px;
++  color: #e7efeb;
++  background: #202a29;
++  border: 1px solid #50615c;
++  border-radius: 12px;
++  font: 13px/1.45 system-ui, sans-serif;
++  color-scheme: dark;
++}
++#module-context-menu .module-menu-title {
++  display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
++  padding: 9px 9px 12px; border-bottom: 1px solid #47534f;
++  font-size: 15px; font-weight: 650; overflow-wrap: anywhere;
++}
++#module-context-menu .module-category { color: #adc3ba; font-size: 12px; font-weight: 450; }
++#module-context-menu .sample-info { color: #c0ccc6; padding: 10px 9px 5px; overflow-wrap: anywhere; }
++#module-context-menu .module-action, #module-context-menu .module-layers button {
++  box-sizing: border-box; border: 0; border-radius: 6px; color: inherit; background: transparent;
++  cursor: pointer; font: inherit;
++}
++#module-context-menu .module-action { width: 100%; padding: 9px; text-align: start; font-weight: 580; }
++#module-context-menu button.module-action:hover, #module-context-menu .module-layers button:hover { background: #34443f; }
++#module-context-menu button:focus-visible { outline: 2px solid #aae0cb; outline-offset: -2px; }
++#module-context-menu .module-layers { display: flex; gap: 3px; align-items: center; margin: 5px 0; padding: 8px; border-block: 1px solid #47534f; }
++#module-context-menu .module-layers span { flex: 1; color: #becac5; }
++#module-context-menu .module-layers button { padding: 5px 9px; }
++#module-context-menu .module-layers button[aria-pressed=true] { color: #102720; background: #b0dbc7; font-weight: 650; }
++#module-context-menu .destructive { color: #ffb9ab; }
+diff --git a/src/ui/positionContextMenu.js b/src/ui/positionContextMenu.js
+new file mode 100644
+index 0000000..fa3baf3
+--- /dev/null
++++ b/src/ui/positionContextMenu.js
+@@ -0,0 +1,10 @@
++export function positionContextMenu(menu, x, y) {
++    const inset = 8;
++    menu.style.maxHeight = 'calc(100dvh - 16px)';
++    menu.style.overflowY = 'auto';
++    menu.style.display = 'block';
++    menu.scrollTop = 0;
++    const {width, height} = menu.getBoundingClientRect();
++    menu.style.left = Math.max(inset, Math.min(x, window.innerWidth - width - inset)) + 'px';
++    menu.style.top = Math.max(inset, Math.min(y, window.innerHeight - height - inset)) + 'px';
++}
+diff --git a/src/ui/ColorPicker.js b/src/ui/ColorPicker.js
+index 45587d2..354e7c8 100644
+--- a/src/ui/ColorPicker.js
++++ b/src/ui/ColorPicker.js
+@@ -161,66 +161,26 @@ export class ColorPicker {
+ // В ColorPicker.js - исправленный selectColor()
+ 
+     selectColor(color, cell) {
+-        // 🚫 Защита от повторных вызовов
+-        if (this._selecting) return;
+-        this._selecting = true;
+-        
+-        // Убираем выделение с предыдущей
+-        if (this.selectedCell) {
+-            this.selectedCell.style.borderColor = 'transparent';
+-        }
+-
+-        // Выделяем новую
+-        this.selectedColor = color;
+-        this.selectedCell = cell;
+-        cell.style.borderColor = '#fff';
+-
+-        // Вызываем callback с задержкой
+-        if (this.options.onSelect) {
+-            setTimeout(() => {
+-                this.options.onSelect(color);
+-                this._selecting = false;
+-            }, 10);
+-        } else {
+-            this._selecting = false;
+-        }
++        this.setSelection(color, cell);
++        this.options.onSelect?.(color);
+     }
+ 
+     resetColor() {
+-        if (this._resetting) return;
+-        this._resetting = true;
+-        
+-        if (this.selectedCell) {
+-            this.selectedCell.style.borderColor = 'transparent';
+-        }
+-        
+-        this.selectedColor = null;
+-        this.selectedCell = null;
+-
+-        if (this.options.onReset) {
+-            setTimeout(() => {
+-                this.options.onReset();
+-                this._resetting = false;
+-            }, 10);
+-        } else {
+-            this._resetting = false;
+-        }
++        this.setSelection(null, null);
++        this.options.onReset?.();
+     }
+ 
+-    setColor(colorHex) {
+-        if (!colorHex) {
+-            this.resetColor();
+-            return;
+-        }
++    setSelection(color, cell) {
++        if (this.selectedCell) this.selectedCell.style.borderColor = 'transparent';
++        this.selectedColor = color;
++        this.selectedCell = cell;
++        if (cell) cell.style.borderColor = '#fff';
++    }
+ 
+-        // Ищем ячейку с таким цветом
+-        const cells = this.element.querySelectorAll('.color-cell');
+-        for (let cell of cells) {
+-            if (cell.dataset.color === colorHex) {
+-                this.selectColor(colorHex, cell);
+-                break;
+-            }
+-        }
++    setColor(color) {
++        const cell = Array.from(this.element?.querySelectorAll('.color-cell') || [])
++            .find(item => item.dataset.color === color);
++        this.setSelection(color ?? null, cell ?? null);
+     }
+ 
+     getColor() {

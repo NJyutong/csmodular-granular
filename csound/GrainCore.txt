@@ -28,6 +28,8 @@ opcode CMGrainCore, aa, aikkkkkkkkkkkkkk
     kSpan[] init 64
     kRead[] init 64
     kStep[] init 64
+    kWarpScale[] init 64
+    kWarpRadians[] init 64
     kSourceLength[] init 64
     kShape[] init 64
     kLeft[] init 64
@@ -97,7 +99,14 @@ opcode CMGrainCore, aa, aikkkkkkkkkkkkkk
                 kRatio = pow(2, limit(kPitch + kPitchRandom * kPitchJitter, -48, 48) / 12)
                 kRate = kRatio * kSourceRate / sr
                 kDuration = max(2, int(kSizeMs * sr / 1000))
-                kStart = limit(kHeldPosition + kPositionRandom * kPosJitter, 0, 1)
+                if iMode == 2 then
+                    ; Warp and wavetable start are independent at grain creation.
+                    kWarpScale[kSlot] = kHeldPosition * kFrames / 6.283185307179586
+                    kWarpRadians[kSlot] = 6.283185307179586 / kFrames
+                    kStart = limit(kPositionRandom * kPosJitter, 0, 1)
+                else
+                    kStart = limit(kHeldPosition + kPositionRandom * kPosJitter, 0, 1)
+                endif
                 if iMode == 1 then
                     ; Writer state exactly as it is at this sample.
                     if kFreeze < 0.5 then
@@ -156,6 +165,12 @@ opcode CMGrainCore, aa, aikkkkkkkkkkkkkk
         endif
         ; Two-point linear interpolation with independent wrap of each index.
         aIndex = kReadNow + kRateNow * aRamp
+        if iMode == 2 && kWarpScale[kVoice] > 0 then
+            ; φ' = φ + β sin(2πφ)/(2π), 0 ≤ β ≤ 1. The warp keeps each
+            ; cycle boundary fixed, moves waveform transitions within the cycle,
+            ; and never reverses phase.
+            aIndex = aIndex + kWarpScale[kVoice] * sin(kWarpRadians[kVoice] * aIndex)
+        endif
         aSample tablexkt aIndex, kSource[kVoice], 0, 2, 0, 0, 1
         aVoice = aSample * aEnvelope
         aSumL = aSumL + aVoice * kLeft[kVoice]

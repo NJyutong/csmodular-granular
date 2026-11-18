@@ -11,11 +11,11 @@ export const GrainOscModule = {
     "gridHeight": 35,
     "originalName": "GrainOsc",
     "defaultParams": [],
-    "tooltip": "Grain generator with a built-in wave (sine, triangle, saw or square), no input needed. Pitch 0 = 220 Hz (A3). Grains/s sets the grain rate, Size their length. Up to 64 grains at once. Small jacks beside knobs add modulation.",
+    "tooltip": "Grain generator with a built-in wave (sine, triangle, saw or square), no input needed. Pitch 0 = 220 Hz (A3). Phase warp reshapes phase progression within each cycle and changes harmonic balance; 0 leaves the selected wave unchanged. Phase jitter varies the starting phase of each grain, with Seed setting the repeatable sequence. Up to 64 grains at once. Small jacks beside knobs add modulation.",
     "tooltipI18n": {
-        "en": "Grain generator with a built-in wave (sine, triangle, saw or square), no input needed. Pitch 0 = 220 Hz (A3). Grains/s sets the grain rate, Size their length. Up to 64 grains at once. Small jacks beside knobs add modulation.",
-        "zh": "内置波形（正弦、三角、锯齿、方波）的颗粒发生器，无需输入。音高 0 = 220 Hz（A3）；颗粒/秒决定颗粒速率，粒长决定每颗粒时长。最多同时 64 个颗粒；旋钮旁的小插孔可叠加调制。",
-        "ru": "Генератор гранул со встроенной волной (синус, треугольник, пила, меандр), вход не нужен. Высота 0 = 220 Гц (A3). Плотность — частота гранул, длина — их длительность. До 64 гранул одновременно. Малые гнёзда рядом с регуляторами принимают модуляцию."
+        "en": "Grain generator with a built-in wave (sine, triangle, saw or square), no input needed. Pitch 0 = 220 Hz (A3). Phase warp reshapes phase progression within each cycle and changes harmonic balance; 0 leaves the selected wave unchanged. Phase jitter varies the starting phase of each grain, with Seed setting the repeatable sequence. Up to 64 grains at once. Small jacks beside knobs add modulation.",
+        "zh": "内置波形（正弦、三角、锯齿、方波）的颗粒发生器，无需输入。音高 0 = 220 Hz（A3）。相位扭曲会在每个周期内改变相位推进速度并重塑谐波；0 保持所选波形不变。相位抖动会改变每个颗粒在波表中的起始相位，Seed 决定可重复的随机序列。最多同时 64 个颗粒；旋钮旁的小插孔可叠加调制。",
+        "ru": "Генератор гранул со встроенной волной (синус, треугольник, пила, меандр), вход не нужен. Высота 0 = 220 Гц (A3). Деформация фазы меняет её ход внутри каждого цикла и перераспределяет гармоники; 0 оставляет выбранную волну без изменений. Разброс фазы меняет начальную фазу для каждой гранулы, а Seed задаёт повторяемую последовательность. До 64 гранул одновременно. Малые гнёзда рядом с регуляторами принимают модуляцию."
     },
     "params": [
         1,
@@ -71,11 +71,11 @@ export const GrainOscModule = {
             "id": "901",
             "x": 12,
             "y": 40,
-            "text": "Pitch 0 = 220 Hz (A3) · right-click: help",
+            "text": "Pitch 0 = 220 Hz (A3)",
             "textI18n": {
-                "en": "Pitch 0 = 220 Hz (A3) · right-click: help",
-                "zh": "音高 0 = 220 Hz（A3）· 右键查看说明",
-                "ru": "Высота 0 = 220 Гц (A3) · ПКМ: справка"
+                "en": "Pitch 0 = 220 Hz (A3)",
+                "zh": "音高 0 = 220 Hz（A3）",
+                "ru": "Высота 0 = 220 Гц (A3)"
             },
             "fontSize": 9
         },
@@ -123,19 +123,19 @@ export const GrainOscModule = {
             "id": "913",
             "x": 12,
             "y": 392,
-            "text": "Advanced · rarely needed",
+            "text": "Advanced · hold & dry input",
             "textI18n": {
-                "en": "Advanced · rarely needed",
-                "zh": "进阶 · 通常不用动",
-                "ru": "Далее · редко нужно"
+                "en": "Advanced · hold & dry input",
+                "zh": "进阶 · 锁定与干声混合",
+                "ru": "Далее · фиксация и микс"
             },
             "fontSize": 11
         },
         {
             "componentType": "Knob",
             "id": "1",
-            "x": 176,
-            "y": 100,
+            "x": 12,
+            "y": 188,
             "size": "medium",
             "min": 0,
             "max": 200,
@@ -145,8 +145,8 @@ export const GrainOscModule = {
         {
             "componentType": "TextLabel",
             "id": "300",
-            "x": 176,
-            "y": 86,
+            "x": 12,
+            "y": 174,
             "text": "Grains/s",
             "textI18n": {
                 "en": "Grains/s",
@@ -158,8 +158,8 @@ export const GrainOscModule = {
         {
             "componentType": "Input",
             "id": "102",
-            "x": 215,
-            "y": 103,
+            "x": 51,
+            "y": 191,
             "jackType": "control",
             "bandwidth": "static",
             "ConnectorName": "Grains/s CV",
@@ -172,7 +172,7 @@ export const GrainOscModule = {
         {
             "componentType": "Knob",
             "id": "2",
-            "x": 12,
+            "x": 94,
             "y": 188,
             "size": "medium",
             "min": 2,
@@ -183,7 +183,7 @@ export const GrainOscModule = {
         {
             "componentType": "TextLabel",
             "id": "301",
-            "x": 12,
+            "x": 94,
             "y": 174,
             "text": "Size ms",
             "textI18n": {
@@ -196,7 +196,7 @@ export const GrainOscModule = {
         {
             "componentType": "Input",
             "id": "103",
-            "x": 51,
+            "x": 133,
             "y": 191,
             "jackType": "control",
             "bandwidth": "static",
@@ -210,57 +210,57 @@ export const GrainOscModule = {
         {
             "componentType": "Knob",
             "id": "3",
-            "x": 12,
-            "y": 428,
+            "x": 94,
+            "y": 100,
             "size": "medium",
             "min": 0,
             "max": 127,
-            "defaultValue": 32,
-            "csoundName": "Position"
+            "defaultValue": 0,
+            "csoundName": "PhaseWarp"
         },
         {
             "componentType": "TextLabel",
             "id": "302",
-            "x": 12,
-            "y": 414,
-            "text": "Phase (unused)",
+            "x": 94,
+            "y": 86,
+            "text": "Phase warp",
             "textI18n": {
-                "en": "Phase (unused)",
-                "zh": "相位（无效果）",
-                "ru": "Фаза (без эфф.)"
+                "en": "Phase warp",
+                "zh": "相位扭曲",
+                "ru": "Деформ. фазы"
             },
             "fontSize": 9
         },
         {
             "componentType": "Input",
             "id": "104",
-            "x": 51,
-            "y": 431,
+            "x": 133,
+            "y": 103,
             "jackType": "control",
             "bandwidth": "static",
-            "ConnectorName": "Phase (unused) CV",
+            "ConnectorName": "Phase warp CV",
             "connectorNameI18n": {
-                "en": "Phase (unused) CV",
-                "zh": "相位（无效果） 调制输入",
-                "ru": "Модуляция: Фаза (без эфф.)"
+                "en": "Phase warp CV",
+                "zh": "相位扭曲 调制输入",
+                "ru": "Модуляция: Деформ. фазы"
             }
         },
         {
             "componentType": "Knob",
             "id": "4",
-            "x": 176,
-            "y": 188,
+            "x": 12,
+            "y": 245,
             "size": "medium",
             "min": 0,
             "max": 127,
-            "defaultValue": 8,
+            "defaultValue": 0,
             "csoundName": "PosJitter"
         },
         {
             "componentType": "TextLabel",
             "id": "303",
-            "x": 176,
-            "y": 174,
+            "x": 12,
+            "y": 231,
             "text": "Phase jitter",
             "textI18n": {
                 "en": "Phase jitter",
@@ -272,8 +272,8 @@ export const GrainOscModule = {
         {
             "componentType": "Input",
             "id": "105",
-            "x": 215,
-            "y": 191,
+            "x": 51,
+            "y": 248,
             "jackType": "control",
             "bandwidth": "static",
             "ConnectorName": "Phase jitter CV",
@@ -286,7 +286,7 @@ export const GrainOscModule = {
         {
             "componentType": "Knob",
             "id": "5",
-            "x": 94,
+            "x": 176,
             "y": 100,
             "size": "medium",
             "min": -48,
@@ -297,7 +297,7 @@ export const GrainOscModule = {
         {
             "componentType": "TextLabel",
             "id": "304",
-            "x": 94,
+            "x": 176,
             "y": 86,
             "text": "Pitch st (0=A3)",
             "textI18n": {
@@ -310,7 +310,7 @@ export const GrainOscModule = {
         {
             "componentType": "Input",
             "id": "106",
-            "x": 133,
+            "x": 215,
             "y": 103,
             "jackType": "control",
             "bandwidth": "static",
@@ -324,7 +324,7 @@ export const GrainOscModule = {
         {
             "componentType": "Knob",
             "id": "6",
-            "x": 12,
+            "x": 94,
             "y": 245,
             "size": "medium",
             "min": 0,
@@ -335,7 +335,7 @@ export const GrainOscModule = {
         {
             "componentType": "TextLabel",
             "id": "305",
-            "x": 12,
+            "x": 94,
             "y": 231,
             "text": "Pitch jitter",
             "textI18n": {
@@ -348,7 +348,7 @@ export const GrainOscModule = {
         {
             "componentType": "Input",
             "id": "107",
-            "x": 51,
+            "x": 133,
             "y": 248,
             "jackType": "control",
             "bandwidth": "static",
@@ -362,7 +362,7 @@ export const GrainOscModule = {
         {
             "componentType": "ButtonIncDec",
             "id": "7",
-            "x": 94,
+            "x": 176,
             "y": 194,
             "width": 57,
             "items": "Hann,Triangle",
@@ -378,7 +378,7 @@ export const GrainOscModule = {
         {
             "componentType": "TextLabel",
             "id": "306",
-            "x": 94,
+            "x": 176,
             "y": 174,
             "text": "Grain window",
             "textI18n": {
@@ -391,7 +391,7 @@ export const GrainOscModule = {
         {
             "componentType": "Input",
             "id": "108",
-            "x": 160,
+            "x": 242,
             "y": 191,
             "jackType": "control",
             "bandwidth": "static",
@@ -481,7 +481,7 @@ export const GrainOscModule = {
         {
             "componentType": "ButtonIncDec",
             "id": "10",
-            "x": 94,
+            "x": 12,
             "y": 434,
             "width": 57,
             "items": "Follow,Hold",
@@ -497,34 +497,34 @@ export const GrainOscModule = {
         {
             "componentType": "TextLabel",
             "id": "309",
-            "x": 94,
+            "x": 12,
             "y": 414,
-            "text": "Hold position",
+            "text": "Hold warp",
             "textI18n": {
-                "en": "Hold position",
-                "zh": "锁定位置",
-                "ru": "Фикс. позицию"
+                "en": "Hold warp",
+                "zh": "锁定扭曲",
+                "ru": "Фикс. деформ."
             },
             "fontSize": 9
         },
         {
             "componentType": "Input",
             "id": "111",
-            "x": 160,
+            "x": 78,
             "y": 431,
             "jackType": "control",
             "bandwidth": "static",
-            "ConnectorName": "Hold position CV",
+            "ConnectorName": "Hold warp CV",
             "connectorNameI18n": {
-                "en": "Hold position CV",
-                "zh": "锁定位置 调制输入",
-                "ru": "Модуляция: Фикс. позицию"
+                "en": "Hold warp CV",
+                "zh": "锁定扭曲 调制输入",
+                "ru": "Модуляция: Фикс. деформ."
             }
         },
         {
             "componentType": "Knob",
             "id": "11",
-            "x": 176,
+            "x": 94,
             "y": 428,
             "size": "medium",
             "min": 0,
@@ -535,7 +535,7 @@ export const GrainOscModule = {
         {
             "componentType": "TextLabel",
             "id": "310",
-            "x": 176,
+            "x": 94,
             "y": 414,
             "text": "Grain/dry mix",
             "textI18n": {
@@ -548,7 +548,7 @@ export const GrainOscModule = {
         {
             "componentType": "Input",
             "id": "112",
-            "x": 215,
+            "x": 133,
             "y": 431,
             "jackType": "control",
             "bandwidth": "static",
@@ -600,7 +600,7 @@ export const GrainOscModule = {
         {
             "componentType": "Knob",
             "id": "13",
-            "x": 94,
+            "x": 176,
             "y": 245,
             "size": "medium",
             "min": 0,
@@ -611,7 +611,7 @@ export const GrainOscModule = {
         {
             "componentType": "TextLabel",
             "id": "312",
-            "x": 94,
+            "x": 176,
             "y": 231,
             "text": "Random seed",
             "textI18n": {

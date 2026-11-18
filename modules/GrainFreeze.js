@@ -70,11 +70,11 @@ export const GrainFreezeModule = {
             "id": "901",
             "x": 12,
             "y": 40,
-            "text": "Record, then Freeze · right-click: help",
+            "text": "Record, then Freeze",
             "textI18n": {
-                "en": "Record, then Freeze · right-click: help",
-                "zh": "先录入再冻结 · 右键查看说明",
-                "ru": "Запись → заморозка · ПКМ: справка"
+                "en": "Record, then Freeze",
+                "zh": "先录入再冻结",
+                "ru": "Запись → заморозка"
             },
             "fontSize": 9
         },

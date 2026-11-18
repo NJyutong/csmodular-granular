@@ -1,54 +1,60 @@
-# 颗粒插件 AI 工作规范
+# Granular Plugin AI Work Guide
 
-权威源码位于此仓库。维护集成时，还需遵守 CsModular 宿主仓库的 AGENTS.md 和项目目录地图。
+Read this file first, then docs/PROJECT_STRUCTURE.md and docs/AI_CONTEXT.md. Read docs/INTEGRATION.md before changing host integration, Csound routing, sample loading, or installation behavior. The technical documents in docs/ are English only. The user manuals at the repository root remain available in English, Simplified Chinese, and Russian.
 
-## 产品和语言
+## Repository scope and authority
 
-实现并维护 Grain Freeze、Grain Sample、Grain Osc：共用 Csound 引擎、CsModular UI 模块、WAV 文件传递、安装、文档和检查。
+This repository is the source of truth for the granular plugin: its Csound core, module definitions, integration patch, installer, tests, and plugin documentation.
 
-- DSP、颗粒调度/播放/窗函数/重叠混音/环形缓冲全部使用 Csound。
-- JavaScript ES modules 负责模块定义、生成/安装脚本、WAV 选择/头部校验/传入 Csound VFS、UI 和自动化检查。Rust 仅属于桌面壳；任何其他语言都不实现颗粒音频算法。
-- 用户指南为英语、简体中文和俄语；UI 根据浏览器/系统语言自动选择 `en`、`zh` 或 `ru`，英语兜底。俄语独立于另外两种语言。
+The CsModular host is maintained in a separate repository. When a task changes host files, first read the host repository's AGENTS.md and docs/PROJECT_STRUCTURE.md, then consult its relevant architecture, contribution, granular, and troubleshooting documents. Use the checked-out host source to confirm current behavior; host documentation can describe a different revision.
 
-## 不可违反的 DSP 和许可规则
+Only inspect a user reference repository after it has actually been provided. Do not download missing references, claim to have inspected unavailable code, or modify a reference repository.
 
-最终音频路径严禁调用或包装 Csound 内置颗粒器：`partikkel`、`partikkelsync`、`grain`、`grain2`、`grain3`、`syncgrain`、`granule`、`diskgrain`、`fof`、`fof2`、`fog`、`sndwarp`、`sndwarpst`、`mincer`、`temposcal`。
+## Product, implementation, and language
 
-唯一共享算法位于 `csound/GrainCore.txt`。三个 `modules/*.txt` 只能包装公共核心并使用 Zak 总线。所有颗粒输出都必须留在模块路由中，可接到 Outs2；不要加独立声卡输出 instrument。
+The plugin provides Grain Freeze, Grain Sample, and Grain Osc. Their editor definitions are JavaScript ES modules; their audio processing is implemented in Csound.
 
-GPL 或许可不明代码只用于理解架构，禁止复制、翻译代码和素材。维护 `SOURCES.md`，写清算法灵感与许可判断。不要改用户提供的参考仓库。
+- Grain scheduling, voice lifetime, table reads, interpolation, playback phase, windows, random state, overlap mixing, and live-ring-buffer processing belong in Csound.
+- JavaScript may implement UI, module definitions, build/install automation, WAV selection and header validation, session-byte retention, and transfer to Csound's virtual file system. It must not decode, resample, or synthesize grain audio.
+- Rust belongs to the host desktop shell; do not move plugin DSP into Rust or another language.
+- User-facing UI and manuals support English, Simplified Chinese, and Russian. Preserve separate Russian text and the host's automatic language selection. The technical documents in docs/ are English only.
 
-## 目录
+## DSP invariants
 
-- `csound/GrainCore.txt`：单份共享 DSP。
-- `modules/GrainFreeze.js/.txt`：实时输入环形缓冲、Freeze 模块 UI/包装。
-- `modules/GrainSample.js/.txt`：Csound 文件表源模块 UI/包装。
-- `modules/GrainOsc.js/.txt`：周期波表源模块 UI/包装。
-- `scripts/build-modules.mjs`：生成上面配对文件、索引、demo。
-- `scripts/install.mjs`：检查/应用宿主补丁、同步文件、注册模块库。
-- `integration/csmodular.patch`：可在宿主基线重放的集成 patch。
-- `examples/`：demo patch。
-- `tests/`：模块契约、真实 Csound WASM 渲染、安装重放、浏览器集成和语言冒烟测试。
-- `README.md` / `README.zh-CN.md` / `README.ru.md`：用户说明。
-- `SOURCES.md` / `reference-files.json`：来源及许可证据。
-- `CHECKS.md` / `VALIDATION.md`：检查历史及基准指标。
+The final audio path must not call or wrap Csound's built-in granular opcodes:
 
-## 当前采样约束
+partikkel, partikkelsync, grain, grain2, grain3, syncgrain, granule, diskgrain, fof, fof2, fog, sndwarp, sndwarpst, mincer, temposcal.
 
-单个 WAV 256 MiB、5 分钟；一个会话最多 512 MiB 输入和 48,000,000 解码单声道帧。支持 8–192 kHz、mono/stereo PCM 8/16/24/32-bit、IEEE float32/64、标准 WAVE_FORMAT_EXTENSIBLE；stereo 使用左声道；不支持 RF64/RIFX。改值需同步更新校验、三语错误提示、所有手册和测试。
+The only shared plugin algorithm is csound/GrainCore.txt. The three modules/*.txt files are thin wrappers that declare the shared dependency and use the host's Zak cable buses. Keep Zak reads and writes at the host block size. Do not add a private voice instrument, an internal audio bus, or direct sound-device output; route module outputs through the patch to a host output such as Outs2.
 
-## 改动和提交流程
+The current core renders host-sized control blocks with audio-rate vector operations and retains sample-accurate grain start offsets. Do not replace this implementation with the local setksmps 1 design described in some older host notes without verifying the current plugin and host integration.
 
-```powershell
-node scripts/build-modules.mjs
-node scripts/install.mjs <path-to-csmodular-main>
-node --test tests/contracts.mjs
-node tests/dsp.mjs
-node tests/install.mjs
-node scripts/host.mjs build
-node tests/integration.mjs
-node tests/system-smoke.mjs
-```
+## Samples and compatibility
 
-按改动选择检查，报告范围和限制。检查生成的 orchestra 没有禁止 opcode，确认 GrainCore 在调用者前加载、Voice/FX 总线工作。宿主和插件分别查看 diff/status，分别提交相关改动；除非用户明确要求，否则不要 push。新增工具和缓存放在仓库外部；不编辑/提交 `node_modules`、`dist` 或临时 `test-results`。
+Current WAV limits are 256 MiB and 5 minutes per file, plus 512 MiB of source files and 48,000,000 decoded mono frames per app session. Supported input is 8–192 kHz, mono or stereo, PCM 8/16/24/32-bit, IEEE float32/64, and standard WAVE_FORMAT_EXTENSIBLE. Stereo uses the left channel. RF64, RIFX, and more than two channels are unsupported.
 
+If these limits or sample behavior change, update the validator, localized UI messages, all three user manuals, relevant checks, and host integration/install artifacts together. Preserve patch compatibility when changing parameter order, jack identifiers, ranges, defaults, or UDO input order.
+
+## Source and licensing rules
+
+Do not copy or translate code or assets from GPL or unclear-license references. Record inspected sources and license judgments in SOURCES.md and reference-files.json. The plugin MIT license covers original plugin work only; it does not replace the host's license notice.
+
+## Workflow and Git
+
+Before editing, inspect Git status and the relevant diff so existing user changes are preserved. Keep plugin changes in this repository and host changes in the host repository.
+
+Regenerate module artifacts when source templates or generated contracts change:
+
+    node scripts/build-modules.mjs
+
+Install the plugin into the supported host checkout only when the task requires it:
+
+    node scripts/install.mjs E:/paper/csmodular-main
+
+The host launcher can run from the plugin root and accepts an optional host path:
+
+    node scripts/host.mjs build E:/paper/csmodular-main
+
+Choose checks that match the change and report what they cover and what remains unverified. The package test scripts are listed in package.json. Do not claim historical entries in CHECKS.md or VALIDATION.md as checks run for the current change.
+
+Review both repositories' status and diffs separately. Commit only when requested or otherwise explicitly authorized, and do not push unless the user asks. Do not edit or commit node_modules, dist output, temporary test-results, personal WAV files, credentials, or local secrets. Keep new dependencies and caches outside the source repository, under D:\csmodular-tools when needed; do not change the system PATH.

@@ -72,11 +72,11 @@ export const GrainSampleModule = {
             "id": "901",
             "x": 12,
             "y": 40,
-            "text": "Empty slot is silent · right-click: help",
+            "text": "Empty slot is silent",
             "textI18n": {
-                "en": "Empty slot is silent · right-click: help",
-                "zh": "空槽无声 · 右键查看说明",
-                "ru": "Пустой слот молчит · ПКМ: справка"
+                "en": "Empty slot is silent",
+                "zh": "空槽无声",
+                "ru": "Пустой слот молчит"
             },
             "fontSize": 9
         },

@@ -41,9 +41,9 @@ involved in this round.
 
 Browser-based DSP, installation, integration and system-smoke checks were not run in this validation round; they require a compatible browser and a host checkout. Real-time audio on a sound card was not evaluated. Three host-specific patch hunks were not checked against customized host files.
 
-Measured behaviour that motivated the panel changes: Grain Osc "Wave phase" changes the spectrum by
-about 0.1 % (inaudible), "Phase jitter" by about 80 %; *Hold position* on Osc/Sample gives
-bit-identical audio unless Position is being modulated.
+Measured behaviour that motivated the first panel revision (before Phase warp existed): Grain Osc
+"Wave phase" changed the spectrum by about 0.1 % (inaudible), "Phase jitter" by about 80 %; *Hold position*
+on Osc/Sample gave bit-identical audio unless Position was being modulated.
 
 Second part of the same day:
 
@@ -60,8 +60,8 @@ Second part of the same day:
   with Hold on.
 - Correction of an earlier suggestion: a non-sine wavetable does **not** make Osc's *Phase* control audible.
   Spectrum change for a 0.37 phase shift is about 1 % for saw and square (0.1 % for sine), because a window
-  over a periodic carrier only shifts it. The knob stays (patch compatibility), is labelled *Phase (unused)* and
-  sits in Advanced.
+  over a periodic carrier only shifts it. **Superseded**: the slot was later given a real job as *Phase warp*
+  (see the last section), so it is no longer unused or labelled that way.
 - Older patches: read from the host source (`PatchLoader.applyParameters`), which applies saved values by index and
   skips indices beyond the saved list, so a patch saved before this round keeps the knob defaults for the new
   parameters (Waveform 0 = sine, Scan 0 = off) and sounds as before. Read, not run in a browser.
@@ -139,3 +139,50 @@ samples or move DSP into JavaScript. Production audio uses the normal DAC path.
 Machine-readable render hashes/levels/times are in `validation-dsp.json`. Test
 WAV files, a screenshot and the generated orchestra remain in ignored
 `test-results/`; they are reproducible by the supplied scripts.
+
+# Review of the Phase warp change (2026-11-16)
+
+Grain Osc's former Position slot now drives a phase warp, phi' = phi + beta*sin(2*pi*phi)/(2*pi) with beta = knob/127
+(core, mode 2). Checked on Csound 7.0.0-beta33 in Node: the mapping is monotonic and continuous across the table wrap,
+and it measurably reshapes saw and square (harmonic spectrum -38 to -40 %, waveform -38 to -41 %, DC below 0.0005).
+Cost: about +9 % on the default Osc (7.5 % -> 8.2 % of real time).
+
+Problems found and fixed in the review:
+
+- **A new Grain Osc was no longer a plain sine.** The knob default stayed 32 (depth 0.25), which puts the second
+  harmonic of "sine" at 12 % of the fundamental (-18 dB); the default jitter of 8 adds up to 6 % more depth per grain.
+  Both defaults are now 0 for Grain Osc only (Sample/Freeze keep 32 / 8). A test builds an Osc from the module's own
+  defaults and requires h2/h1 < 1 % (measured 0.18 %).
+- **The in-app guide still said Phase and Hold "have no audible effect"**, and the validation notes still described the
+  knob as unused. The guide (patch) and the notes were corrected.
+- **"Hold phase" was a wrong name**: Hold freezes the warp amount, not a phase. Renamed *Hold warp*.
+- **The control sat in "Advanced · rarely needed"**, two sections away from Waveform although it is a tone control.
+  Phase warp now sits next to Waveform and Pitch in section 1; its jitter is in section 2 with the other jitters.
+- The Windows Chrome default of the browser tests had been removed; it is restored (CHROME_PATH still overrides it).
+- Updated 2026-11-17: Phase jitter varies each grain's wavetable start independently of the held warp depth. Saved Position values still set warp depth. The per-sample comparisons use zero warp and nonzero start-phase jitter, including a Seed change during playback.
+
+## 2026-11-17 host measurements
+
+Chrome on Windows, 48 kHz, with the demo patch and two stereo IEEE float WAVs at
+192 kHz. The files totalled 493 MiB (255 MiB float64 and 238 MiB float32).
+Each of two consecutive replacements of slot 2 kept exactly two WAV names in
+the live Csound VFS. GEN01 table lengths were 16,711,677 and 31,195,130 mono
+frames before and after both replacements. Checking table lengths matters:
+beta33 can list a file written with appendFile while reporting only the last
+chunk length to the decoder.
+
+The sum of Windows private bytes for the dedicated Chrome processes sampled
+before import was 359 MiB and peaked at 2,545 MiB (441 samples, 100 ms polling
+interval). This measures browser process memory, including Csound, across
+import and playback restart. The 512 MiB quota applies to retained WAV input.
+Native Tauri and physical low-memory devices were not measured.
+
+In a separate 1000 × 700 browser canvas run with 4× CPU throttling, 25 pans
+of the same scene (48 Grain Osc modules) made 103 panel draw calls instead of
+1,225. Median voice-layer draw time over the last 20 pans was 5.3 ms versus
+33.6 ms. These are drawing measurements, not audio rendering or total frame times.
+
+In an alternating WASM render of a 2 s Osc patch (48 kHz, ksmps 4, 200 grains/s,
+500 ms grains, full warp and start-phase jitter), moving the two invariant warp
+coefficients to grain creation reduced median render time from 1,543 to 1,447.5 ms
+(four runs per version). Maximum absolute float-output difference was zero.

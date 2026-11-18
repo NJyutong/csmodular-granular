@@ -6,7 +6,7 @@
       "library": "granular",
       "id": 1,
       "type": 0,
-      "parameters": "[0,24,80,32,8,0,0,0,64,64,0,127,90,1,0]",
+      "parameters": "[0,24,80,0,0,0,0,0,64,64,0,127,90,1,0]",
       "modes": [],
       "area": "VOICE",
       "hpos": 2,

@@ -12,12 +12,12 @@ Original, patchable granular synthesis for CsModular. Grain scheduling, playback
 
 ## Panel workflow
 
-Panels follow the order you work in: **1 source/tone → 2 shape & randomness → 3 stereo output → Advanced**. Osc starts with Waveform, Pitch and Grains/s; Sample starts with the file slot, position and Scan speed; Freeze starts with Record/Freeze and lookback. Controls that rarely change the result sit in Advanced. Phase and Hold position on Osc are inaudible on periodic waves and remain for patch compatibility.
+Panels follow the order you work in: **1 source/tone → 2 shape & randomness → 3 stereo output → Advanced**. Osc starts with Waveform, Phase warp and Pitch (a new Osc starts as a plain wave: warp 0, phase jitter 0); Sample starts with the file slot, position and Scan speed; Freeze starts with Record/Freeze and lookback. Controls that rarely change the result sit in Advanced. Osc's Phase warp reshapes each waveform cycle; Hold warp keeps its depth fixed. It reuses the old Position slot, so a patch saved with an older Grain Osc keeps its stored value as the warp depth and may sound slightly different. Phase jitter varies the wavetable start of each grain.
 
 
 ## First use
 
-Click **Start here** at the top right, then **Load starter patch**. It loads Grain Osc → Outs2, with confirmation before replacing your patch. Save your work first. Lower speaker volume and press ▶ in the bottom bar. The guide covers cables, controls, saving and silence troubleshooting. Each panel now identifies its source. Grain window is a named Hann/Triangle selector; live Freeze offers Record/Freeze, while sample/osc offer Follow/Hold position. Parameter IDs and DSP routing remain compatible.
+Connect Grain Osc L/R to Outs2 L/R. Lower the volume and press ▶ to play.
 
 
 ## Language
@@ -78,14 +78,14 @@ Audio cables are converted by the host before entering these static control jack
 |---|---|---|
 | Density | 0–200 grains/s; 0 lets existing voices finish | 100 grains/s |
 | Size | 2–500 ms; live grains may shorten for read/write safety | 250 ms |
-| Position | 0–127 maps to 0–1; live: recent → older safe history (about 4 s at 48 kHz); Osc: start phase of each grain, **no audible effect** on any periodic wave (kept for patch compatibility) | 1 source span |
-| Pos jitter | 0–127, maximum random displacement in source span (panel label: Phase jitter on Osc, Position jitter on Sample, Lookback jitter on Freeze) | 1 source span |
+| Position / Phase warp | 0–127 maps to 0–1; live: recent → older safe history (about 4 s at 48 kHz); Sample: read position; Osc: phase-warp depth within each oscillator cycle. 0 leaves the selected wave unchanged; higher values reshape harmonic balance | 1 source span (live/sample); 1 normalized warp depth (Osc) |
+| Position jitter / Phase jitter | 0–127, maximum random displacement in source span; on Osc, varies the starting phase of each grain using Seed | 1 source span (live/sample); 1 cycle of phase jitter (Osc) |
 | Pitch | −48…+48 semitones | 12 semitones |
 | Pitch jitter | 0–24 semitones, symmetric per grain | 12 semitones |
 | Window | 0 = Hann, 1 = triangle; threshold 0.5 | 1 |
 | Pan | 0 = left, 127 = right; equal-power gains | 1 normalized pan |
 | Spread | 0–127; random pan range up to ±0.5 | 1 normalized spread |
-| Freeze | threshold 0.5; Freeze module: stops live writes. Sample (labelled *Hold position*): pauses Scan and ignores Position changes. Osc: no audible effect | 1 |
+| Freeze | threshold 0.5; Freeze module: stops live writes. Sample (labelled *Hold position*): pauses Scan and ignores Position changes. Osc (labelled *Hold warp*): holds the phase-warp amount | 1 |
 | Wet mix | 0–127, dry → wet (panel label: Dry/wet on Freeze, Grain/dry mix on Osc and Sample) | 1 normalized mix |
 | Level | 0–127, 0 → unity | 1 normalized level |
 | Seed | integer 0–65534, no CV; independent per instance | — |
@@ -93,18 +93,20 @@ Audio cables are converted by the host before entering these static control jack
 | Scan | −100…+100 % of the file per second, 0 = stay at Position; Grain Sample only, no CV. Position moves by itself and wraps at the file ends; Hold pauses it | — |
 | Waveform | 0–3 (rounded like the tooltip) = sine, triangle, saw, square (one period, 220 Hz root); Grain Osc only, no CV. Saw/square use 24/23 harmonics, so they alias at high pitches | — |
 
-Ranges are clamped in Csound. Position/Pitch/Window/Pan and size are captured
-at grain creation. Position CV scans subsequent grains without retuning active
-ones. In sample/osc mode Freeze holds Position; density, pitch and other controls
-remain live. The dry signal continues through Mix. Changing Seed resets only
-that instance's random sequence; restart the patch for identical scheduling too.
+Ranges are clamped in Csound. Position or phase-warp depth, start position jitter, pitch,
+window, pan and size are captured at grain creation. Position CV scans new
+live/sample grains; Phase warp CV sets the depth for new Osc grains. In
+sample/osc mode Freeze holds the current position or warp amount; density, pitch
+and other controls remain live. The dry signal continues through Mix. Changing
+Seed resets only that instance's random sequence; restart the patch for identical
+scheduling too.
 
 ## Engine and routing
 
 The scheduler accumulates `density / sr` each sample and attempts one grain per
 crossing. Each instance owns 64 reusable slots. A full pool drops new triggers,
 without stealing or truncating active grains. Three Park–Miller random draws
-choose position, pitch and pan for each accepted trigger.
+choose position (or Osc phase-warp depth), pitch and pan for each accepted trigger.
 
 The core renders one control block (the host's `ksmps=4`) at a time. The
 scheduler still advances sample by sample, so a grain started at offset *j* of a block
