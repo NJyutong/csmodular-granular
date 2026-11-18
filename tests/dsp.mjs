@@ -20,7 +20,7 @@ const server = createServer(async (req, res) => {
     } catch { res.writeHead(404); res.end(); }
 });
 await new Promise(r => server.listen(0, '127.0.0.1', r));
-const executablePath = process.env.CHROME_PATH;
+const executablePath = process.env.CHROME_PATH || (process.platform === 'win32' ? 'C:/Program Files/Google/Chrome/Application/chrome.exe' : undefined);
 const browser = await chromium.launch({ executablePath, headless: true });
 const page = await browser.newPage();
 const output = resolve(root, 'test-results');

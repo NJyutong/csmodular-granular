@@ -8,7 +8,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const host = resolve(root, '../csmodular-main');
 const server = await createServer({ root: host, configFile: resolve(host, 'vite.config.js'), server: { port: 0, host: '127.0.0.1' }, logLevel: 'error' });
 await server.listen();
-const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH, headless: true, args: ['--autoplay-policy=no-user-gesture-required'] });
+const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || (process.platform === 'win32' ? 'C:/Program Files/Google/Chrome/Application/chrome.exe' : undefined), headless: true, args: ['--autoplay-policy=no-user-gesture-required'] });
 const page = await browser.newPage({ locale: 'en-US', viewport: { width: 1440, height: 1000 } });
 const errors = [];
 page.on('pageerror', e => { errors.push(e.message); console.error('Page error:', e.message); });

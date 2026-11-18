@@ -39,6 +39,34 @@ test('Public module definitions match the actual Csound signatures and static ja
     }
 });
 
+test('Grain Osc phase warp reuses the saved Phase slot and CV jack', async () => {
+    const js = await readFile(resolve(root, 'modules/GrainOsc.js'), 'utf8');
+    const definition = parseModuleDefinition(js);
+    const phase = definition.components.find(c => c.componentType === 'Knob' && c.id === '3');
+    const phaseLabel = definition.components.find(c => c.componentType === 'TextLabel' && c.id === '302');
+    const phaseCv = definition.components.find(c => c.componentType === 'Input' && c.id === '104');
+    const jitterLabel = definition.components.find(c => c.componentType === 'TextLabel' && c.id === '303');
+    assert.equal(phase.csoundName, 'PhaseWarp');
+    // A new Grain Osc must start as the plain wave: zero warp, zero phase jitter. Old patches keep their saved value.
+    assert.deepEqual([phase.min, phase.max, phase.defaultValue], [0, 127, 0]);
+    assert.equal(definition.components.find(c => c.componentType === 'Knob' && c.id === '4').defaultValue, 0);
+    const wave = definition.components.find(c => c.componentType === 'Knob' && c.id === '14');
+    assert.equal(phase.y, wave.y, 'Phase warp sits next to Waveform in the Tone section');
+    assert.equal(definition.components.find(c => c.componentType === 'TextLabel' && c.id === '309').text, 'Hold warp', 'Hold holds the warp amount, not a phase');
+    assert.equal(phaseLabel.text, 'Phase warp');
+    assert.equal(phaseCv.ConnectorName, 'Phase warp CV');
+    assert.equal(jitterLabel.text, 'Phase jitter');
+    assert.equal(definition.components.find(c => c.componentType === 'Input' && c.id === '105').ConnectorName, 'Phase jitter CV');
+    assert.equal(definition.params[2], 3);
+
+    // The demo patch stands in for a saved project from before the DSP change:
+    // its existing value remains at the same serialized parameter index.
+    const patch = JSON.parse(await readFile(resolve(root, 'examples/granular-demo.json'), 'utf8'));
+    const saved = JSON.parse(patch.modules.find(m => m.name === 'GrainOsc').parameters);
+    assert.equal(saved[3], 0);
+    assert.equal(saved.length, 15);
+});
+
 function wave({ rate = 44100, frames = 8, channels = 2, bits = 16 } = {}) {
     const align = channels * bits / 8;
     const b = Buffer.alloc(44 + frames * align);
@@ -62,8 +90,8 @@ test('WAV validation rejects malformed inputs without replacing a valid slot', a
 });
 
 test('Sample bytes upload once per Csound instance; replacements use unique paths', async () => {
-    const bank = new GrainSamples(), writes = [];
-    const csound = { fs: { writeFile: async (path, bytes) => writes.push([path, bytes]) } };
+    const bank = new GrainSamples(), writes = [], removed = [];
+    const csound = { fs: { writeFile: async (path, bytes) => writes.push([path, bytes]), unlink: async path => removed.push(path) } };
     const first = await bank.load(1, wave());
     await bank.upload(csound);
     await bank.upload(csound);
@@ -72,6 +100,7 @@ test('Sample bytes upload once per Csound instance; replacements use unique path
     assert.notEqual(first.path, second.path);
     await bank.upload(csound);
     assert.equal(writes.length, 2);
+    assert.deepEqual(removed, [first.path]);
     await bank.upload({ fs: csound.fs });
     assert.equal(writes.length, 3);
     assert.match(bank.orchestra(), /ftsr\(giGrainSample1\)/);

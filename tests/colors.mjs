@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
 const host=resolve(root,'../csmodular-main');
 const server=await createServer({root:host,configFile:resolve(host,'vite.config.js'),server:{port:0,host:'127.0.0.1'},logLevel:'error'});await server.listen();
-const browser=await chromium.launch({executablePath:process.env.CHROME_PATH,headless:true});
+const browser=await chromium.launch({executablePath:process.env.CHROME_PATH || (process.platform === 'win32' ? 'C:/Program Files/Google/Chrome/Application/chrome.exe' : undefined),headless:true});
 try {
  const page=await browser.newPage({viewport:{width:1440,height:1000}});
  await page.goto(server.resolvedUrls.local[0]);await page.waitForFunction(()=>window.system?.csoundGen);

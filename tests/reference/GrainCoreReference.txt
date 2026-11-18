@@ -1,6 +1,7 @@
 ; REFERENCE IMPLEMENTATION (per-sample, setksmps 1) - kept only for regression tests.
 ; This is the engine as it was before the block renderer replaced it. The production
-; engine in csound/GrainCore.txt must stay bit-identical to this one at ksmps=1.
+; engine in csound/GrainCore.txt must stay bit-identical to this one at ksmps=1, except for
+; the Grain Osc phase warp (mode 2 with a non-zero Position), which this engine predates.
 ; Do not include this file in a module library.
 ; Original CsModular granular engine. No granular synthesis opcodes.
 ; A private 64-voice pool runs at one sample per local control cycle.

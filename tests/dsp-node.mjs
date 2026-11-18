@@ -115,10 +115,12 @@ const goertzel = (samples, frequency, from = 48000, count = 48000) => {
     return Math.hypot(re, im) / count;
 };
 // 110 grains/s = one grain every two periods of the 220 Hz root, so overlapping grains add coherently into a steady tone.
-const oscWave = wave => render(`osc-wave-${wave}`, `${oscWrapper}\ninstr 1\nGrainOsc ${[110, 30, 32, 0, 0, 0, 0, 64, 0, 0, 127, 127, 1, wave, 1, ...Array(12).fill(1), 2, 3].join(',')}\naL zar 2\naR zar 3\nouts aL,aR\nendin`, { duration: 2 });
+const oscWave = (wave, phaseWarp = 0, phaseJitter = 0, seed = 1) => render(`osc-wave-${wave}-${phaseWarp}-${phaseJitter}-${seed}`, `${oscWrapper}\ninstr 1\nGrainOsc ${[110, 30, phaseWarp, phaseJitter, 0, 0, 0, 64, 0, 0, 127, 127, seed, wave, 1, ...Array(12).fill(1), 2, 3].join(',')}\naL zar 2\naR zar 3\nouts aL,aR\nendin`, { duration: 2 });
 const harmonics = {};
+const waveOutputs = {};
 for (const wave of [0, 1, 2, 3]) {
     const r = await oscWave(wave);
+    waveOutputs[wave] = r;
     harmonics[wave] = [1, 2, 3].map(h => goertzel(r.samples, 220 * h));
 }
 console.log('  osc harmonics 1..3 per wave:', Object.entries(harmonics).map(([w, h]) => `${w}: ${h.map(v => v.toFixed(3)).join('/')}`).join('  '));
@@ -129,6 +131,55 @@ assert(ratio(2, 1) > 0.25, 'Saw has a strong second harmonic');
 assert(ratio(3, 2) > 0.2 && ratio(3, 2) > 2 * ratio(0, 2), 'Square has a strong third harmonic');
 assert(ratio(1, 2) < ratio(3, 2) / 2 && ratio(1, 2) > ratio(0, 2) * 0.8, 'Triangle third harmonic is weaker than the square one');
 assert.equal((await oscWave(7)).hash, (await oscWave(3)).hash, 'Out-of-range waveform clamps to the last wave');
+
+// Phase warp changes the phase progression once per cycle. Measure harmonic
+// magnitudes over a steady 1 s segment and compare the actual rendered waveforms.
+const harmonicSpectrum = samples => Array.from({ length: 24 }, (_, i) => goertzel(samples, 220 * (i + 1)));
+const relativeSpectrumDifference = (a, b) => {
+    const denominator = a.reduce((sum, value) => sum + value * value, 0);
+    return Math.sqrt(a.reduce((sum, value, i) => sum + (value - b[i]) ** 2, 0) / Math.max(denominator, 1e-30));
+};
+const relativeWaveDifference = (a, b) => {
+    let error = 0, signal = 0;
+    for (let i = 48000; i < 96000; i++) {
+        const x = a[2 * i], difference = x - b[2 * i];
+        error += difference * difference;
+        signal += x * x;
+    }
+    return Math.sqrt(error / Math.max(signal, 1e-30));
+};
+const meanLevel = samples => {
+    let sum = 0;
+    for (let i = 48000; i < 96000; i++) sum += samples[2 * i];
+    return sum / 48000;
+};
+const phaseWarpReport = [];
+for (const wave of [2, 3]) {
+    const baseline = waveOutputs[wave];
+    const warped = await oscWave(wave, 127);
+    const spectrumDifference = relativeSpectrumDifference(harmonicSpectrum(baseline.samples), harmonicSpectrum(warped.samples));
+    const waveformDifference = relativeWaveDifference(baseline.samples, warped.samples);
+    const dcOffset = meanLevel(warped.samples);
+    console.log(`  phase warp wave ${wave}: harmonic-spectrum delta=${(100 * spectrumDifference).toFixed(1)}%, waveform delta=${(100 * waveformDifference).toFixed(1)}%, DC=${dcOffset.toFixed(5)}`);
+    assert(spectrumDifference > 0.05, `Phase warp measurably changes wave ${wave} harmonic magnitudes`);
+    assert(waveformDifference > 0.05, `Phase warp measurably changes wave ${wave} waveform`);
+    assert(Math.abs(dcOffset) < 0.01, `Phase warp keeps wave ${wave} DC offset small`);
+    phaseWarpReport.push({ wave, normalizedHarmonicSpectrumDifference: spectrumDifference, normalizedWaveformDifference: waveformDifference, dcOffset });
+}
+// A freshly created Grain Osc must be the plain wave it says it is: take the knob defaults from the module itself.
+const oscDefinition = JSON.parse((await readFile(resolve(root, 'modules/GrainOsc.js'), 'utf8')).replace(/^[^=]*=/, '').trim().replace(/;$/, ''));
+const oscDefaults = oscDefinition.params.map(id => { const c = oscDefinition.components.find(k => k.id === String(id) && ['Knob', 'ButtonIncDec'].includes(k.componentType)); return c.componentType === 'Knob' ? c.defaultValue : c.initialIndex; });
+oscDefaults[0] = 110; oscDefaults[1] = 30; // lock grains to the 220 Hz root so overlapping grains add into a steady tone
+const defaultOsc = await render('osc-module-defaults', `${oscWrapper}\ninstr 1\nGrainOsc ${[...oscDefaults, 1, ...Array(12).fill(1), 2, 3].join(',')}\naL zar 2\naR zar 3\nouts aL,aR\nendin`, { duration: 2 });
+const defaultH1 = goertzel(defaultOsc.samples, 220);
+console.log(`  new Grain Osc defaults: h2/h1=${(goertzel(defaultOsc.samples, 440) / defaultH1).toFixed(4)}, h3/h1=${(goertzel(defaultOsc.samples, 660) / defaultH1).toFixed(4)}`);
+assert(goertzel(defaultOsc.samples, 440) / defaultH1 < 0.01, 'A new Grain Osc starts as a clean sine (no second harmonic)');
+assert(goertzel(defaultOsc.samples, 660) / defaultH1 < 0.05, 'A new Grain Osc starts as a clean sine (small third harmonic)');
+const fullWarp = await oscWave(3, 127);
+assert.equal((await oscWave(3, 127)).hash, fullWarp.hash, 'Phase warp is repeatable with a fixed Seed');
+const jittered = await oscWave(3, 0, 127, 19);
+assert.equal((await oscWave(3, 0, 127, 19)).hash, jittered.hash, 'Per-grain start-phase jitter is repeatable with a fixed Seed');
+assert.notEqual(jittered.hash, waveOutputs[3].hash, 'Start-phase jitter changes the square-wave render');
 
 // Knob tooltips show the rounded value, so a slot/waveform knob at 1.6 must act as 2.
 const slotTwo = (await render('slot-2-loaded', sampleBody(2), { extra: bankOrchestra(new Set([2])), files: { 'sample-test.wav': wav } })).hash;
@@ -170,10 +221,12 @@ while iN < 9000 do
     tableiw (iN / 9000) * 2 - 1, iN, giSaw
     iN += 1
 od`;
+// The historical reference predates phase warp, so its periodic-source parity
+// cases use zero warp; the new warped output is covered by the spectral checks above.
 const scenarios = {
-    osc_default: { duration: 4, body: `aL,aR CMGrainCore aIn,2,giSin,16384,${220 * 16384},24,80,0.2,0.1,0,0,0,0.5,0.7,0,19` },
-    osc_dense_triangle: { duration: 4, body: `aL,aR CMGrainCore aIn,2,giSin,16384,${220 * 16384},200,500,0.2,1,0,24,1,0.5,0.7,0,19` },
-    osc_modulated: { duration: 6, body: `kD = 40 + 30*oscili(1,0.5)\nkW = (timeinsts() > 3 ? 1 : 0)\naL,aR CMGrainCore aIn,2,giSin,16384,${220 * 16384},kD,150,0.4,0.5,3,6,kW,0.3,0.8,0,7` },
+    osc_default: { duration: 4, body: `aL,aR CMGrainCore aIn,2,giSin,16384,${220 * 16384},24,80,0,0.1,0,0,0,0.5,0.7,0,19` },
+    osc_dense_triangle: { duration: 4, body: `aL,aR CMGrainCore aIn,2,giSin,16384,${220 * 16384},200,500,0,1,0,24,1,0.5,0.7,0,19` },
+    osc_modulated: { duration: 6, body: `kD = 40 + 30*oscili(1,0.5)\nkW = (timeinsts() > 3 ? 1 : 0)\naL,aR CMGrainCore aIn,2,giSin,16384,${220 * 16384},kD,150,0,0.5,3,6,kW,0.3,0.8,0,7` },
     sample_noise: { duration: 4, body: 'aL,aR CMGrainCore aIn,0,giNoise,48000,44100,40,120,0.3,0.5,7,3,0,0.5,0.9,0,3' },
     sample_tiny_extreme: { duration: 3, body: 'aL,aR CMGrainCore aIn,0,giTiny,2,48000,200,5,0.5,0.5,48,0,0,0.5,0.7,0,9' },
     sample_pitch_down: { duration: 4, body: 'aL,aR CMGrainCore aIn,0,giSaw,9000,48000,60,300,0.8,0.5,-36,12,0,0,1,0,11' },
@@ -182,7 +235,7 @@ const scenarios = {
     live_extreme_lookback: { duration: 6, input: 'aIn = 0.4*oscili(1, 330)', body: 'aL,aR CMGrainCore aIn,1,giRing,192000,48000,120,400,1,0,-12,0,0,0.5,0.5,0,5' },
     live_fast_pitch_freeze: { duration: 5, input: 'aIn = 0.4*oscili(1, 441)', body: 'kFr = (timeinsts() > 2 && timeinsts() < 3.1 ? 1 : 0)\naL,aR CMGrainCore aIn,1,giRing,192000,48000,80,60,0.9,0.2,24,5,1,0.5,0.7,kFr,2' },
     table_switch_mid_grain: { duration: 5, body: 'kT = (timeinsts() > 2 ? 2 : 5)\nkF = (timeinsts() > 2 ? 48000 : 9000)\naL,aR CMGrainCore aIn,0,kT,kF,48000,50,200,0.3,0.2,0,0,0,0.5,0.7,0,9' },
-    seed_change: { duration: 4, body: 'kS = (timeinsts() > 2 ? 100 : 5)\naL,aR CMGrainCore aIn,2,giSin,16384,' + 220 * 16384 + ',60,60,0.2,0.4,0,3,0,0.5,1,0,kS' },
+    seed_change: { duration: 4, body: 'kS = (timeinsts() > 2 ? 100 : 5)\naL,aR CMGrainCore aIn,2,giSin,16384,' + 220 * 16384 + ',60,60,0,0.4,0,3,0,0.5,1,0,kS' },
 };
 const speedups = [];
 for (const [ksmps, tolerance] of [[1, 0], [4, 2e-3]]) {
@@ -205,5 +258,5 @@ for (const [ksmps, tolerance] of [[1, 0], [4, 2e-3]]) {
 console.log('Speed-up over the per-sample reference at ksmps=4:', speedups.map(s => `${s.name} ${s.factor.toFixed(1)}x`).join(', '));
 assert(speedups.every(s => s.factor > 1.5), 'The block renderer must be clearly faster than the per-sample reference');
 await mkdir(resolve(root, 'test-results'), { recursive: true });
-await writeFile(resolve(root, 'test-results/dsp-node-report.json'), JSON.stringify({ report, speedups }, null, 2) + '\n');
+await writeFile(resolve(root, 'test-results/dsp-node-report.json'), JSON.stringify({ report, speedups, phaseWarp: phaseWarpReport }, null, 2) + '\n');
 console.log('Node DSP checks passed.');

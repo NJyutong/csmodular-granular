@@ -8,7 +8,7 @@ const host = resolve(root, '../csmodular-main');
 await mkdir(resolve(root, 'test-results'), { recursive: true });
 const fixture = await mkdtemp(resolve(root, 'test-results/install-'));
 execFileSync('git', ['init', '-q', fixture]);
-const paths = ['src/csound/CsoundGenerator.js', 'src/csound/CsoundEngine.js', 'src/ui/ModuleContextMenu.js', 'src/ModuleFactory.js', 'vite.config.js', 'public/libraries/_index.json', 'src/components/Panel.js'];
+const paths = ['src/csound/CsoundGenerator.js', 'src/csound/CsoundEngine.js', 'src/ui/ModuleContextMenu.js', 'src/ModuleFactory.js', 'vite.config.js', 'public/libraries/_index.json', 'src/components/Panel.js', 'src/ui/ColorPicker.js'];
 for (const path of paths) {
     const original = execFileSync('git', ['-c', `safe.directory=${host.replaceAll('\\', '/')}`, 'show', `10136ca:${path}`], { cwd: host });
     await mkdir(dirname(resolve(fixture, path)), { recursive: true });
@@ -17,7 +17,7 @@ for (const path of paths) {
 for (let attempt = 0; attempt < 2; attempt++) {
     execFileSync(process.execPath, [resolve(root, 'scripts/install.mjs'), fixture], { stdio: 'inherit' });
 }
-for (const path of [...paths.slice(0, 5), 'src/csound/GrainSamples.js', 'src/utils/locale.js', 'src/ui/GranularGuide.js']) {
+for (const path of [...paths.slice(0, 5), 'src/csound/GrainSamples.js', 'src/utils/locale.js', 'src/ui/module-menu.css', 'src/ui/positionContextMenu.js', 'src/ui/ColorPicker.js']) {
     const actual = (await readFile(resolve(fixture, path), 'utf8')).replaceAll('\r\n', '\n');
     const expected = (await readFile(resolve(host, path), 'utf8')).replaceAll('\r\n', '\n');
     assert(actual === expected, `Installed content matches host: ${path}`);

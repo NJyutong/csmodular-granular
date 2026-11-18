@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
 const host=resolve(root,'../csmodular-main');
 const server=await preview({root:host,configFile:resolve(host,'vite.config.js'),preview:{port:0,host:'127.0.0.1'},logLevel:'error'});
-const browser=await chromium.launch({executablePath:process.env.CHROME_PATH,headless:true});
+const browser=await chromium.launch({executablePath:process.env.CHROME_PATH || (process.platform === 'win32' ? 'C:/Program Files/Google/Chrome/Application/chrome.exe' : undefined),headless:true});
 try {
  const page=await browser.newPage({viewport:{width:1440,height:1000}});
  const errors=[];page.on('pageerror',e=>errors.push(e.message));

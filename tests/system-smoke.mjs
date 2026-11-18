@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
 const host=resolve(root,'../csmodular-main');
 const server=await preview({root:host,configFile:resolve(host,'vite.config.js'),preview:{port:0,host:'127.0.0.1'},logLevel:'error'});
-const browser=await chromium.launch({executablePath:process.env.CHROME_PATH,headless:true});
+const browser=await chromium.launch({executablePath:process.env.CHROME_PATH || (process.platform === 'win32' ? 'C:/Program Files/Google/Chrome/Application/chrome.exe' : undefined),headless:true});
 const patch=JSON.parse(await readFile(resolve(root,'examples/granular-demo.json'),'utf8'));
 try {
  for(const [locale,title,load] of [['en-US','Grain Sample','Load WAV'],['zh-CN','颗粒采样','导入 WAV'],['ru-RU','Гранулярный сэмпл','Загрузить WAV']]){
@@ -47,11 +47,7 @@ try {
   await page.screenshot({path:resolve(root,'test-results/locale-'+locale+'.png')});
   await page.evaluate(()=>window.system.moduleContextMenu.hide());
   await page.screenshot({path:resolve(root,'test-results/panels-'+locale+'.png')});
-  await page.locator('#granular-guide-open').click();
-  await page.screenshot({path:resolve(root,'test-results/guide-'+locale+'.png')});
-  page.once('dialog', d => d.accept());
-  await page.locator('#granular-guide .guide-actions button').first().click();
-  await page.waitForFunction(()=>!document.querySelector('#granular-guide'));
+  assert.equal(await page.locator('#granular-guide-open, #granular-guide').count(), 0);
   const starter = await page.evaluate(()=>{
     const system=window.system;
     const osc=Object.values(system.patchLoader.moduleMap.byId).find(p=>p.jsonName==='GrainOsc');
@@ -61,7 +57,7 @@ try {
     selector.setValue(saved[7]);
     return {count:system.csoundGen.modules.size,cables:system.csoundGen._activeCables.length,value:selector.getValue(),type:selector.constructor.name};
   });
-  assert.equal(starter.count,2);assert.equal(starter.cables,2);
+  assert.equal(starter.count,4);assert.equal(starter.cables,3);
   assert.equal(starter.value,1);assert.equal(starter.type,'ButtonIncDec');
   await page.goto(server.resolvedUrls.local[0]+'editor/editor.html');
   await page.waitForLoadState('networkidle');
