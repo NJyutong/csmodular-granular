@@ -1,0 +1,2877 @@
+// main.js
+import { ModuleFactory } from './src/ModuleFactory.js';
+import { Grid } from './src/grid/Grid.js';
+import { BASE_STEP_X, BASE_STEP_Y, PANEL_GRID_WIDTH, CABLE_COLORS,
+         MIN_SCALE, MAX_SCALE } from './src/constants.js';
+import { themeStore } from './src/theme/themeStore.js';
+import { libraryStore } from './src/api/index.js';
+import { Panel } from './src/components/Panel.js';
+import { PatchManager } from './src/PatchManager.js';
+import { PatchLoader } from './src/PatchLoader.js';
+import { LayerManager } from './src/managers/LayerManager.js';
+import { EventManager } from './src/managers/EventManager.js';
+import { UIManager } from './src/managers/UIManager.js';
+import { ContextMenu } from './src/ui/ContextMenu.js';
+import { JackContextMenu } from './src/ui/JackContextMenu.js';
+import { ComponentContextMenu } from './src/ui/ComponentContextMenu.js';
+import { ModuleContextMenu } from './src/ui/ModuleContextMenu.js'; 
+import { CSoundWindow } from './src/ui/CSoundWindow.js'; 
+import { CsoundGenerator } from './src/csound/CsoundGenerator.js';
+import { CsoundEngine } from './src/csound/CsoundEngine.js';
+import { DesignSettingsPanel } from './src/ui/DesignSettingsPanel.js';
+import { MappingTables } from './src/csound/MappingTables.js';
+import { debounce } from './src/utils/debounce.js';
+import { initCurrentTheme, getCurrentTheme } from './src/theme/currentTheme.js';
+import { Sticker } from './src/stickers/Sticker.js';
+import { drawSticker, drawStickerSelection } from './src/stickers/StickerRenderer.js';
+import { StickerContextMenu } from './src/ui/StickerContextMenu.js';
+import { StickerPropertiesPanel } from './src/ui/StickerPropertiesPanel.js';
+import { releaseSvg } from './src/stickers/svgCache.js';
+import { BottomBar } from './src/ui/BottomBar.js';
+import { MidiManager } from './src/midi/MidiManager.js';
+import { OscManager } from './src/midi/OscManager.js';
+import { OscSettingsPanel } from './src/ui/OscSettingsPanel.js';
+import { Minimap } from './src/ui/Minimap.js';
+import { Splash, getStartPatchPref } from './src/ui/Splash.js'; 
+
+const DYNAMIC_COMPONENT_TYPES = new Set(['LED', 'MiniVU', 'Graph']);
+
+// Глобальный обработчик ошибок
+window.addEventListener('error', (event) => {
+  console.error('💥 GLOBAL ERROR:', event.error);
+  console.error('💥 Error in:', event.filename, 'line:', event.lineno);
+
+  if (modularSystem) {
+    modularSystem.showNotification(
+      `💥 Error: ${event.error?.message || 'Unknown error'}`,
+    );
+  }
+
+  // Не останавливаем распространение
+});
+
+
+
+// Глобальное логирование для Csound
+window.csoundLog = [];
+
+function logCsound(message, data = null) {
+    const entry = {
+        time: new Date().toISOString(),
+        message: message,
+        data: data,
+        stack: new Error().stack?.split('\n').slice(2, 5).join('\n')
+    };
+    window.csoundLog.push(entry);
+    console.log(`🎵 [Csound] ${message}`, data || '');
+}
+
+// Перехватываем ошибки Csound
+window.addEventListener('unhandledrejection', (event) => {
+    if (event.reason?.message?.includes('csound') || 
+        event.reason?.message?.includes('Csound')) {
+        logCsound('UNHANDLED CSOUND ERROR', {
+            message: event.reason.message,
+            stack: event.reason.stack
+        });
+    }
+});
+
+
+class ModularSystem {
+  constructor() {
+    this._voiceDirty = true;
+    this._fxDirty = true;
+    this._stickerDirty = true;
+    // Проверяем, не создан ли уже экземпляр
+    if (window.modularSystemInstance) {
+      console.warn('⚠️ ModularSystem already exists! Reusing...');
+      return window.modularSystemInstance;
+    }
+    this.canvas = document.getElementById('modularCanvas');
+    this.ctx = this.canvas.getContext('2d');
+    this.dynamicCanvas = document.getElementById('dynamicCanvas');
+    this.dynamicCtx = this.dynamicCanvas.getContext('2d');
+    this.stickerCanvas = document.getElementById('stickerCanvas');
+    this.stickerCtx = this.stickerCanvas.getContext('2d');
+    this.overlayCanvas = document.getElementById('overlayCanvas');
+    this.overlayCtx = this.overlayCanvas.getContext('2d');
+    this.components = [];
+    this.draggingComponent = null;
+    this.scale = 1.0;
+    this.locked = false;
+    this.offsetX = 0;
+    this.offsetY = 0;
+    this.isPanning = false;
+    this.startPanX = 0;
+    this.startPanY = 0;
+    this.startOffsetX = 0;
+    this.startOffsetY = 0;
+    this.activePanel = null;
+    this.imageUploadBtn = null;
+    this.lastMouseX = null;
+    this.lastMouseY = null;
+    this.debugCables = false;
+    this.currentPatchFilename = null;
+    this.grid = new Grid();
+    this.layerManager = new LayerManager(this.canvas);
+    this.layerManager.system = this;
+    this.patchManager = new PatchManager(this);
+    this.eventManager = new EventManager(this.canvas, this);
+    this.uiManager = new UIManager(this);
+    this.uiManager.container.style.display = 'none';
+    this.contextMenu = new ContextMenu(this);
+    this.jackContextMenu = new JackContextMenu(this);
+    this.moduleContextMenu = new ModuleContextMenu(this);
+    this.componentContextMenu = new ComponentContextMenu(this);
+    this.stickerContextMenu = new StickerContextMenu(this);
+    this.stickerProperties = new StickerPropertiesPanel(this);
+    this.bottomBar = new BottomBar(this);
+    this.minimap = new Minimap(this);
+    this.minimap.hide();
+    this.splash = new Splash(this);  
+    this.csoundWindow = new CSoundWindow(this);
+    this.designSettings = new DesignSettingsPanel(this);
+
+    this.collisionHighlight = {
+      show: false,
+      gridX: 0,
+      gridY: 0,
+    };
+
+    this.moduleFactory = new ModuleFactory();
+    this.moduleFactory.parentSystem = this;
+
+    this.patchLoader = new PatchLoader(this);
+    this.selectedModule = null; // Выбранный модуль для удаления
+    this.selectedSticker = null;
+    this.stickers = [];
+    window.modularSystemInstance = this;
+    this.setupKeyboardListeners();
+    this.setupCanvas();
+    this.setupResizeHandler();
+    this.animate();
+
+    // ⭐ Parallax фон
+    this.parallaxElement = document.getElementById('parallax-bg');
+    this.parallaxMouseX = 0;
+    this.parallaxMouseY = 0;
+    this.parallaxCurrentX = 0;
+    this.parallaxCurrentY = 0;
+    this.parallaxStrength = 20;   // ← сила смещения в px
+    this.parallaxSmoothing = 0.08; // ← плавность (0..1)
+
+    // === ДОБАВЛЯЕМ ДЛЯ ОТЛАДКИ ===
+    this.frameCount = 0;
+    this.lastFPSTime = performance.now();
+    this.currentFPS = 0;
+
+    //this.maxFPS = 60; // Ограничиваем до 60 FPS
+    //this.frameInterval = 1000 / this.maxFPS;
+    this.lastFrameTime = 0;
+
+    // === ИСПРАВЛЕННЫЙ ПРОФАЙЛЕР ===
+    this.profiler = {
+      enabled: true,
+      marks: {},
+      times: {
+        total: 0,
+        clear: 0,
+        drawVoice: 0,
+        drawFx: 0,
+        drawDivider: 0,
+        drawCables: 0,
+      },
+      frameCount: 0,
+      lastLogTime: performance.now(),
+    };
+
+    // Добавляем методы прямо в класс
+    this.startMeasure = this.startMeasure.bind(this);
+    this.endMeasure = this.endMeasure.bind(this);
+    this.logPerformance = this.logPerformance.bind(this);
+
+    // ⭐ Mapping tables
+    this.mappingTables = new MappingTables();
+    this.mappingTables.load();
+
+    // Csound Generator (генерирует ORC)
+    this.csoundGen = new CsoundGenerator();
+    this.csoundGen.system = this; 
+
+    this.midiManager = new MidiManager();
+    this._bpm = 120;
+    this._bpmSource = 'internal';   
+
+    // Csound Engine (управляет инстансом Csound)
+    this.csoundEngine = new CsoundEngine(this);
+    this.csoundEngine.onStateChange((state, info) => {
+        this.uiManager.updateCsoundStatus(
+            this._csoundStateLabel(state),
+            this._csoundStateColor(state)
+        );
+        this.uiManager.updateCsoundInfo(info || this._csoundStateInfo(state));
+        this.uiManager.updateCsoundRunButton(state);
+    });
+
+    // Debounce для recompile (не чаще раза в 300мс)
+    this._recompileDebounced = debounce(
+        () => this.csoundEngine.recompile(),
+        300
+    );
+    this.setupParallax();
+    this.applyBackgroundFromTheme();   // ⭐ применяем фон из темы
+  }
+
+  setBPM(bpm) {
+    if (this._bpmSource === 'external') return;   // ⭐ drag не работает в EXT
+    const v = Math.max(20, Math.min(300, Math.round(Number(bpm) || 120)));
+    if (this._bpm === v) return;
+    this._bpm = v;
+    this.csoundEngine?.setChannel?.('bpm', v);
+  }
+
+  getBPM() {
+    return this._bpm ?? 120;
+  }
+
+  setBpmSource(source) {
+    if (source !== 'internal' && source !== 'external') return;
+    if (this._bpmSource === source) return;
+    this._bpmSource = source;
+
+    if (source === 'internal') {
+        // вернуться к последнему внутреннему BPM
+        this.csoundEngine?.setChannel?.('bpm', this._bpm ?? 120);
+    }
+    // external — BPM будет приходить из midiManager через _applyExternalBpm
+  }
+
+  getBpmSource() {
+    return this._bpmSource;
+  }
+
+  // вызывать из main.js при 0xF8 (если external)
+  _applyExternalBpm(bpm) {
+    if (this._bpmSource !== 'external') return;
+    const v = Math.max(20, Math.min(300, Math.round(bpm)));
+    if (this._bpm === v) return;
+    this._bpm = v;
+    this.csoundEngine?.setChannel?.('bpm', v);
+  }
+
+  setupParallax() {
+      if (!this.parallaxElement) return;
+      
+      document.addEventListener('mousemove', (e) => {
+          // Нормализуем: -1..1 от центра экрана
+          this.parallaxMouseX = (e.clientX / window.innerWidth - 0.5) * 2;
+          this.parallaxMouseY = (e.clientY / window.innerHeight - 0.5) * 2;
+      });
+  }
+
+
+  applyBackgroundFromTheme() {
+    const theme = getCurrentTheme();
+    const el = this.parallaxElement;
+    if (!el) return;
+
+    const image = theme.getBackgroundImage();
+
+    if (!image) {
+      // Фон отключён
+      el.style.backgroundImage = 'none';
+      el.style.backgroundColor = 'transparent';
+      el.style.display = 'none';
+    } else if (this._isColorValue(image)) {
+      // Solid-цвет
+      el.style.backgroundImage = 'none';
+      el.style.backgroundColor = image;
+      el.style.display = 'block';
+    } else {
+      // Картинка
+      el.style.backgroundImage = `url('${image}')`;
+      el.style.backgroundColor = 'transparent';
+      el.style.display = 'block';
+    }
+
+    this.parallaxStrength = theme.getParallaxStrength();
+  }
+
+  /**
+   * Проверить, является ли значение CSS-цветом (а не URL).
+   * Поддерживает: #rgb, #rrggbb, rgb(...), rgba(...), hsl(...), hsla(...).
+   */
+  _isColorValue(value) {
+    if (typeof value !== 'string') return false;
+    const v = value.trim().toLowerCase();
+    return v.startsWith('#') ||
+           v.startsWith('rgb(') ||
+           v.startsWith('rgba(') ||
+           v.startsWith('hsl(') ||
+           v.startsWith('hsla(');
+  }
+
+  applyGridFromTheme() {
+    if (!this.grid) return;
+    if (this.grid.applyThemeSettings()) {
+      this.forceRedraw();
+    }
+  }
+
+  updateParallax() {
+      if (!this.parallaxElement) return;
+      
+      // Плавное приближение к целевой позиции
+      const targetX = -this.parallaxMouseX * this.parallaxStrength;
+      const targetY = -this.parallaxMouseY * this.parallaxStrength;
+      
+      this.parallaxCurrentX += (targetX - this.parallaxCurrentX) * this.parallaxSmoothing;
+      this.parallaxCurrentY += (targetY - this.parallaxCurrentY) * this.parallaxSmoothing;
+      
+      this.parallaxElement.style.transform = 
+          `translate3d(${this.parallaxCurrentX}px, ${this.parallaxCurrentY}px, 0)`;
+  }
+
+  setLocked(value) {
+      this.locked = !!value;
+      this.showNotification?.(this.locked ? '🔒 Patch locked' : '🔓 Patch unlocked');
+      this.bottomBar?.refreshState?.();
+  }
+
+  isLocked() {
+      return !!this.locked;
+  }
+
+  _renderDynamic() {
+      const ctx = this.dynamicCtx;
+      if (!ctx) return;
+
+      ctx.clearRect(0, 0, this.dynamicCanvas.width, this.dynamicCanvas.height);
+
+      ctx.save();
+      ctx.translate(this.offsetX, this.offsetY);
+      ctx.scale(this.scale, this.scale);
+
+      const layers = this.layerManager.layers;
+
+      for (const layerName of ['voice', 'fx']) {
+          const layer = layers[layerName];
+          if (!layer) continue;
+
+          for (const module of layer.modules) {
+              if (module.pixelX == null || module.pixelY == null) continue;
+
+              // ⭐ Кэш: пересобирается при refreshPanel/removeModule/addModule.
+              let comps = module._dynamicComps;
+              if (comps === undefined) {
+                  comps = (module.components || []).filter(
+                      c => DYNAMIC_COMPONENT_TYPES.has(c.constructor.name)
+                  );
+                  module._dynamicComps = comps;   // может быть []
+              }
+              if (comps.length === 0) continue;
+
+              for (const comp of comps) comp.draw(ctx);
+          }
+      }
+
+      ctx.restore();
+  }
+
+  _csoundStateLabel(state) {
+      return {
+          'idle': 'IDLE',
+          'initializing': 'INIT...',
+          'running': 'RUNNING',
+          'error': 'ERROR'
+      }[state] || state.toUpperCase();
+  }
+
+  _csoundStateColor(state) {
+      return {
+          'idle': '#8f8',
+          'initializing': '#ff0',
+          'running': '#0f0',
+          'error': '#f44'
+      }[state] || '#fff';
+  }
+
+  _csoundStateInfo(state) {
+      return {
+          'idle': 'Not running',
+          'initializing': 'Starting Csound...',
+          'running': 'Csound running',
+          'error': 'Csound failed to start'
+      }[state] || '';
+  }
+
+  // ============================================================
+  //  STICKERS
+  // ============================================================
+
+  addSticker(data = {}) {
+      const sticker = new Sticker(data);
+      this.stickers.push(sticker);
+      this.forceRedraw();
+      return sticker;
+  }
+
+  addStickerAtPosition(worldX, worldY, data = {}) {
+      const snapped = this.grid.snapToGrid(worldX, worldY);
+      return this.addSticker({
+          ...data,
+          gridX: snapped.gridX,
+          gridY: snapped.gridY,
+      });
+  }
+
+  removeSticker(sticker) {
+      if (this.locked && !opts.force) {
+          this.showNotification?.('🔒 Patch is locked');
+          return;
+      }
+      const idx = this.stickers.indexOf(sticker);
+      if (idx === -1) return;
+      this.stickers.splice(idx, 1);
+      if (this.selectedSticker === sticker) {
+          this.selectedSticker = null;
+      }
+
+      releaseSvg(sticker.id);
+      this.forceRedraw();
+  }
+
+  selectSticker(sticker) {
+      if (this.selectedSticker && this.selectedSticker !== sticker) {
+          this.selectedSticker.isSelected = false;
+      }
+      this.selectedSticker = sticker;
+      if (sticker) sticker.isSelected = true;
+      this.forceRedraw();
+  }
+
+  deselectSticker() {
+      if (this.selectedSticker) {
+          this.selectedSticker.isSelected = false;
+          this.selectedSticker = null;
+          this.forceRedraw();
+      }
+  }
+
+  /**
+   * Hit-test: ищет стикер по world-координатам.
+   * @param {number} worldX
+   * @param {number} worldY
+   * @param {'behind'|'front'|null} zFilter — если null, ищет в обоих
+   * @returns {Sticker|null}
+   */
+  getStickerAtPosition(worldX, worldY, zFilter = null) {
+      for (let i = this.stickers.length - 1; i >= 0; i--) {
+          const s = this.stickers[i];
+          if (zFilter && s.z !== zFilter) continue;
+          if (s.hitTest(worldX, worldY)) return s;
+      }
+      return null;
+  }
+
+  _hasAnimatedStickers() {
+      for (const s of this.stickers) {
+          if (s.type === 'text' && s.marquee?.enabled) return true;
+      }
+      return false;
+  }
+
+  startMeasure(name) {
+    // Защита от undefined
+    if (!this.profiler) {
+      // Если profiler не существует - создаем на лету
+      this.profiler = {
+        enabled: true,
+        marks: {},
+        times: {},
+        frameCount: 0,
+        lastLogTime: performance.now(),
+      };
+    }
+
+    if (!this.profiler.enabled) return;
+    this.profiler.marks[name] = performance.now();
+  }
+
+  endMeasure(name) {
+    // Защита от undefined
+    if (!this.profiler || !this.profiler.enabled) return 0;
+
+    const start = this.profiler.marks[name];
+    if (!start) return 0;
+
+    const duration = performance.now() - start;
+
+    // Инициализируем times[name] если нужно
+    if (!this.profiler.times[name]) {
+      this.profiler.times[name] = 0;
+    }
+
+    // Сглаживание
+    const alpha = 0.3;
+    this.profiler.times[name] =
+      this.profiler.times[name] * (1 - alpha) + duration * alpha;
+
+    delete this.profiler.marks[name];
+    return duration;
+  }
+
+  resetProfiler() {
+    if (!this.profiler) return;
+    this.profiler.times = {
+      total: 0,
+      clear: 0,
+      drawVoice: 0,
+      drawFx: 0,
+      drawDivider: 0,
+      drawCables: 0,
+    };
+    this.profiler.frameCount = 0;
+    this.profiler.lastLogTime = performance.now();
+  }
+
+  forceRedraw() {
+      this._forceRedraw = true;
+      this._voiceDirty = true;
+      this._fxDirty = true;
+      this._cablesDirty = true;
+      this._stickerDirty = true;   // ⭐ NEW
+  }
+
+
+  /**
+   * Пересчитать активные варианты для всех модулей патча
+   * и применить к UI: обновить типы джеков, перекрасить выходные кабели.
+   * 
+   * Вызывается после addCable / removeCable.
+   */
+/**
+ * Пересчитать активные варианты для модулей патча и применить к UI.
+ *
+ * @param {Panel[]|null} affectedPanels — если задано, обрабатываются только
+ *   эти панели (и перекрашиваются только их выходные кабели). Если null —
+ *   полный проход (используется после load / hot-reload / изменения вариантов).
+ */
+  async recomputeVariantUI(affectedPanels = null) {
+      if (!this.csoundGen) return;
+
+      // 1. variants — нужны всегда: _prepareVariants решает, кто на самом деле
+      //    сменил вариант. Это дешёвая операция (кэш внутри CsoundGenerator).
+      await this.csoundGen._loadVariantsForModules();
+      this.csoundGen._prepareVariants();
+
+      // 2. Кого проверяем
+      const panels = affectedPanels
+          ? affectedPanels.filter(p => p && p.components)
+          : this.components.filter(c => c instanceof Panel);
+
+      // 3. Индекс: instanceId → panel (только для затронутых)
+      //    CsoundGenerator.modules — Map<key, moduleData>. Строим reverse-карту
+      //    один раз, а не find() внутри цикла (было O(n²)).
+      const panelsById = new Map();
+      for (const p of panels) panelsById.set(String(p.jsonId), p);
+
+      const moduleDataByInstance = new Map();
+      for (const md of this.csoundGen.modules.values()) {
+          moduleDataByInstance.set(String(md.instanceId), md);
+      }
+
+      let touched = false;
+
+      for (const panel of panels) {
+          const moduleData = moduleDataByInstance.get(String(panel.jsonId));
+          if (!moduleData) continue;
+
+          const moduleDef = this.moduleFactory?.moduleRegistry?.[moduleData.typeId];
+          if (!moduleDef?.variants || moduleDef.variants.length < 2) continue;
+
+          const activeSuffix = moduleData._activeVariant;
+          if (!activeSuffix) continue;
+
+          if (panel._lastAppliedVariant === activeSuffix) continue;
+
+          const activeVariant = moduleDef.variants.find(v => v.suffix === activeSuffix);
+          if (!activeVariant) continue;
+
+          this._applyVariantToPanel(panel, activeVariant);
+          panel._lastAppliedVariant = activeSuffix;
+          touched = true;
+      }
+
+      if (!touched) return;   // ⭐ ничего не изменилось — не дёргаем redraw/recompile
+
+      // 4. Force redraw
+      this._voiceDirty = true;
+      this._fxDirty = true;
+      this._cablesDirty = true;
+      this.forceRedraw?.();
+  }
+
+  _applyVariantToPanel(panel, variant) {
+      const moduleDef = this.moduleFactory?.moduleRegistry?.[panel.jsonName];
+      if (!moduleDef) return;
+
+      const inputIds  = moduleDef.inputs  || [];
+      const outputIds = moduleDef.outputs || [];
+
+      // ⭐ Слитый проход Input/Output
+      const applyRates = (ids, suffixes) => {
+          for (let i = 0; i < ids.length; i++) {
+              const comp = panel.components.find(c => String(c.id) === String(ids[i]));
+              if (!comp) continue;
+              const newType = this._typeFromSuffix(suffixes[i], comp.originalType);
+              if (comp.type !== newType) comp.type = newType;
+              comp.updateCenterColor(comp.getEffectiveColor());
+          }
+      };
+      applyRates(inputIds,  variant.ins  || []);
+      applyRates(outputIds, variant.outs || []);
+
+      // ⭐ Перекрашиваем ТОЛЬКО выходные кабели этой панели.
+      //    Используем jack.cables (уже ведётся в BaseJack) вместо скана
+      //    this.patchManager.cables.
+      for (const comp of panel.components) {
+          if (comp.constructor.name !== 'Output' || !comp.cables?.length) continue;
+          for (const cable of comp.cables) {
+              const sourceType = comp.type;
+              cable.typeColor = CABLE_COLORS[sourceType] || CABLE_COLORS.other;
+          }
+      }
+
+      // ⭐ connected-флаг
+      panel.components.forEach(comp => {
+          if (comp.constructor.name === 'Input' || comp.constructor.name === 'Output') {
+              comp.connected = comp.cables.length > 0;
+          }
+      });
+  }
+
+  _typeFromSuffix(suffix, originalType = null) {
+      const isAudioRate = (suffix === 'a');
+      
+      // logic-семейство
+      if (originalType === 'logic' || originalType === 'logicAudio') {
+          return isAudioRate ? 'logicAudio' : 'logic';
+      }
+      // audio/control-семейство
+      if (originalType === 'audio' || originalType === 'control') {
+          return isAudioRate ? 'audio' : 'control';
+      }
+      // fallback
+      return isAudioRate ? 'audio' : 'control';
+  }
+
+
+  toggleProfiler(enabled) {
+    if (!this.profiler) return;
+    this.profiler.enabled =
+      enabled !== undefined ? enabled : !this.profiler.enabled;
+    console.log(
+      `📊 Profiler ${this.profiler.enabled ? 'enabled' : 'disabled'}`,
+    );
+    return this.profiler.enabled;
+  }
+
+  updateCanvasDisplay() {
+    if (!this.canvas) return;
+
+    // Базовые размеры (если не установлены)
+    if (!this.baseCanvasWidth || !this.baseCanvasHeight) {
+      this.baseCanvasWidth = this.canvas.width;
+      this.baseCanvasHeight = this.canvas.height;
+    }
+
+    const container = this.canvas.parentElement || document.body;
+    const containerWidth = container.clientWidth;
+    const containerHeight = container.clientHeight;
+
+    // Сохраняем aspect ratio базовых размеров
+    const baseAspect = this.baseCanvasWidth / this.baseCanvasHeight;
+    const containerAspect = containerWidth / containerHeight;
+
+    let displayWidth, displayHeight;
+
+    if (containerAspect > baseAspect) {
+      // Контейнер шире - ограничиваем по высоте
+      displayHeight = containerHeight;
+      displayWidth = displayHeight * baseAspect;
+    } else {
+      // Контейнер выше - ограничиваем по ширине
+      displayWidth = containerWidth;
+      displayHeight = displayWidth / baseAspect;
+    }
+
+    // Устанавливаем CSS размеры с центрированием
+    this.canvas.style.width = `${displayWidth}px`;
+    this.canvas.style.height = `${displayHeight}px`;
+    this.canvas.style.margin = 'auto';
+    this.canvas.style.display = 'block';
+    this.canvas.style.position = 'absolute';
+    this.canvas.style.left = '50%';
+    this.canvas.style.top = '50%';
+    this.canvas.style.transform = 'translate(-50%, -50%)';
+
+    console.log(`Canvas display: ${displayWidth}x${displayHeight}px`);
+  }
+
+  get layers() {
+    if (this.layerManager) {
+      return this.layerManager.layers;
+    }
+    // Fallback для совместимости
+    return {
+      voice: { modules: [], x: 10, y: 10, width: 0, visibleHeight: 0 },
+      fx: { modules: [], x: 10, y: 320, width: 0, visibleHeight: 0 },
+    };
+  }
+
+  addComponent(component) {
+    this.components.push(component);
+    // Сортируем по zIndex при добавлении
+    this.sortComponentsByZIndex();
+  }
+
+  sortComponentsByZIndex() {
+    this.components.sort((a, b) => {
+      return (a.zIndex || 0) - (b.zIndex || 0);
+    });
+  }
+
+  setupKeyboardListeners() {
+    document.addEventListener('keydown', (e) => {
+      // Только если не в поле ввода
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+        return;
+      }
+
+      switch (e.key) {
+        case 'Delete':
+        case 'Del':
+            if (this.locked) {
+                this.showNotification?.('🔒 Patch is locked');
+                return;
+            }
+            if (this.selectedSticker) {
+                this.removeSticker(this.selectedSticker);
+            } else {
+                this.deleteSelectedModule();
+            }
+            break;
+        case 'Escape':
+            this.deselectModule();
+            this.deselectSticker();
+            break;
+        case 'd':
+        case 'D':
+        case 'в':
+        case 'В':  // русская раскладка
+            // Не открывать если в поле ввода
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+                return;
+            }
+            e.preventDefault();
+            this.designSettings.toggle();
+            break;
+        case 'm':
+        case 'M':
+        case 'ь':
+        case 'Ь':
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+                return;
+            }
+            e.preventDefault();
+            this.minimap?.toggle();
+            this.bottomBar?.refreshState?.();
+            break;
+      }
+    });
+  }
+
+  selectModule(module) {
+    // Снимаем выделение с предыдущего модуля
+    if (this.selectedModule && this.selectedModule !== module) {
+      this.selectedModule.setSelected(false);
+    }
+
+    this.selectedModule = module;
+    module.setSelected(true);
+  }
+
+  deselectModule() {
+    if (this.selectedModule) {
+      this.selectedModule.setSelected(false);
+      this.selectedModule = null;
+    }
+  }
+
+  deleteSelectedModule() {
+    if (!this.selectedModule) {
+      console.log('No module selected');
+      return;
+    }
+
+    const moduleName = this.selectedModule.title;
+    const moduleId = this.selectedModule.moduleId;
+
+    this.removeModule(this.selectedModule);
+    this.selectedModule = null;
+
+  }
+
+  setupCanvas() {
+      // ⭐ Canvas = окно браузера
+      this.resizeCanvasToWindow();
+
+      this.overlayCanvas.style.backgroundColor = 'transparent';
+      this.overlayCanvas.style.border = 'none';
+      this.overlayCanvas.style.zIndex = '4';
+      this.overlayCanvas.style.position = 'fixed';
+      this.overlayCanvas.style.left = '0';
+      this.overlayCanvas.style.top = '0';
+      this.overlayCanvas.style.pointerEvents = 'none';
+
+      // stickerCanvas — между LED-слоем и кабелями
+      this.stickerCanvas.style.backgroundColor = 'transparent';
+      this.stickerCanvas.style.border = 'none';
+      this.stickerCanvas.style.zIndex = '3';
+      this.stickerCanvas.style.position = 'fixed';
+      this.stickerCanvas.style.left = '0';
+      this.stickerCanvas.style.top = '0';
+      this.stickerCanvas.style.pointerEvents = 'none';
+
+      // dynamicCanvas — поверх основного
+      this.dynamicCanvas.style.backgroundColor = 'transparent';
+      this.dynamicCanvas.style.border = 'none';
+      this.dynamicCanvas.style.zIndex = '2';
+      this.dynamicCanvas.style.position = 'fixed';
+      this.dynamicCanvas.style.left = '0';
+      this.dynamicCanvas.style.top = '0';
+      this.dynamicCanvas.style.pointerEvents = 'none';
+
+      // Прозрачный фон
+      this.canvas.style.backgroundColor = 'transparent';
+      this.canvas.style.border = 'none';
+      this.canvas.style.zIndex = '1';
+      this.canvas.style.position = 'fixed';
+      this.canvas.style.left = '0';
+      this.canvas.style.top = '0';
+      this.canvas.style.transform = 'none';   // ← убираем центрирование
+      this.canvas.style.objectFit = 'none';
+
+      // Сохраняем базовые размеры (для GridCache и т.д.)
+      this.baseCanvasWidth = this.canvas.width;
+      this.baseCanvasHeight = this.canvas.height;
+
+      // Обновляем UI
+      setTimeout(() => {
+          if (this.uiManager && this.uiManager.updatePosition) {
+              this.uiManager.updatePosition();
+          }
+      }, 100);
+
+      window.addEventListener('resize', () => {
+          this.resizeCanvasToWindow();
+          this.forceRedraw();
+          
+          if (this.uiManager && this.uiManager.updatePosition) {
+              setTimeout(() => this.uiManager.updatePosition(), 50);
+          }
+      });
+
+      // Контекстное меню — запрещено
+      this.canvas.addEventListener('contextmenu', (e) => {
+          e.preventDefault();
+      });
+  }
+
+  resizeCanvasToWindow() {
+      const dpr = 1;//window.devicePixelRatio || 1;
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+
+      // Основной канвас
+      this.canvas.width = w * dpr;
+      this.canvas.height = h * dpr;
+      this.canvas.style.width = `${w}px`;
+      this.canvas.style.height = `${h}px`;
+      this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+      // Динамический канвас (LED)
+      if (this.dynamicCanvas) {
+          this.dynamicCanvas.width = w * dpr;
+          this.dynamicCanvas.height = h * dpr;
+          this.dynamicCanvas.style.width = `${w}px`;
+          this.dynamicCanvas.style.height = `${h}px`;
+          this.dynamicCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      }
+
+      // Sticker-canvas (все стикеры)
+      if (this.stickerCanvas) {
+          this.stickerCanvas.width = w * dpr;
+          this.stickerCanvas.height = h * dpr;
+          this.stickerCanvas.style.width = `${w}px`;
+          this.stickerCanvas.style.height = `${h}px`;
+          this.stickerCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      }
+
+      // Overlay-канвас (кабели, выделение)
+      if (this.overlayCanvas) {
+          this.overlayCanvas.width = w * dpr;
+          this.overlayCanvas.height = h * dpr;
+          this.overlayCanvas.style.width = `${w}px`;
+          this.overlayCanvas.style.height = `${h}px`;
+          this.overlayCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      }
+
+      // ⭐ Minimap: пересчитать при ресайзе (viewport-рамка изменилась)
+      this.minimap?._markDirty();
+  }
+
+  openContextMenuAtMousePosition() {
+    if (this.eventManager) {
+      this.eventManager.openContextMenuAtPosition(
+        this.eventManager.lastMouseX + this.canvas.offsetLeft,
+        this.eventManager.lastMouseY + this.canvas.offsetTop,
+      );
+    }
+  }
+
+  setupResizeHandler() {
+    let resizeTimeout;
+
+    window.addEventListener('resize', () => {
+      clearTimeout(resizeTimeout);
+      resizeTimeout = setTimeout(() => {
+        //console.log('Window resized, updating UI...');
+
+        // Обновляем позицию UI панели
+        if (this.uiManager && this.uiManager.updatePosition) {
+          this.uiManager.updatePosition();
+        }
+      }, 100);
+    });
+  }
+
+
+  async loadPatchFromJson(patchData) {
+    return await this.patchLoader.loadPatch(patchData);
+  }
+
+  async createPlaceholderModule(moduleName, moduleId, hpos, vpos, layerName) {
+    // Проверяем, есть ли модуль-заглушка
+    const placeholderName = 'MissingModule';
+
+    if (!this.moduleFactory.moduleRegistry[placeholderName]) {
+      try {
+        // Пробуем загрузить модуль-заглушку
+        const modulePath = `/modules/${placeholderName}.js`;
+        const module = await import(/* @vite-ignore */ modulePath);
+        const moduleKey = Object.keys(module)[0];
+
+        if (moduleKey && module[moduleKey]) {
+          this.moduleFactory.registerModule(placeholderName, module[moduleKey]);
+        }
+      } catch (error) {
+        // Создаем простую заглушку
+        const placeholderDef = {
+          displayName: `MISS: ${moduleName}`,
+          gridHeight: 2,
+          width: 100,
+          height: 60,
+          components: [
+            {
+              componentType: 'TextLabel',
+              x: 10,
+              y: 10,
+              text: `MISSING: ${moduleName}`,
+              fontSize: 10,
+              color: '#ff0000',
+            },
+            {
+              componentType: 'TextLabel',
+              x: 10,
+              y: 25,
+              text: `ID: ${moduleId}`,
+              fontSize: 8,
+              color: '#888888',
+            },
+          ],
+          ports: [],
+        };
+
+        this.moduleFactory.registerModule(placeholderName, placeholderDef);
+      }
+    }
+
+    // Создаем заглушку
+    const placeholder = this.moduleFactory.createModule(
+      placeholderName,
+      hpos,
+      vpos,
+      layerName,
+    );
+
+    if (placeholder) {
+      placeholder.jsonId = moduleId;
+      placeholder.jsonName = moduleName;
+      placeholder.isPlaceholder = true;
+
+      this.moduleMap[moduleId] = placeholder;
+
+      return placeholder;
+    }
+
+    return null;
+  }
+
+  exportPatch() {
+    // Это будет использоваться для "Save" (сохранить с текущим именем)
+    if (this.currentPatchFilename) {
+      this.savePatch(this.currentPatchFilename);
+    } else {
+      // Если имени нет - вызываем Save As
+      this.savePatchAs();
+    }
+  }
+
+
+  exportPatchToJson() {
+      const modulesData = this.collectModulesForExport();
+      const cablesData = this.collectCablesForExport();
+
+      return {
+          filename: this.currentPatchFilename || 'export.json',
+          modules: modulesData,
+          cables: cablesData,
+          stickers: this.stickers.map(s => s.toJSON()),
+          design: this.collectDesignForExport(),   // ⭐ NEW
+          textpad: '',
+      };
+  }
+
+  // ⭐ NEW — полная тема (кроме preset) для сохранения в патч
+  collectDesignForExport() {
+      const s = getCurrentTheme().settings;
+      return {
+          lcd: {
+              color:           s.lcd?.color           ?? DEFAULT_THEME.lcd.color,
+              glow:            s.lcd?.glow            ?? DEFAULT_THEME.lcd.glow,
+              panelOpacity:    s.lcd?.panelOpacity    ?? DEFAULT_THEME.lcd.panelOpacity,
+              lineWeight:      s.lcd?.lineWeight      ?? DEFAULT_THEME.lcd.lineWeight,
+          },
+          cables: {
+              audioWidth:      s.cables?.audioWidth   ?? DEFAULT_THEME.cables.audioWidth,
+              controlWidth:    s.cables?.controlWidth ?? DEFAULT_THEME.cables.controlWidth,
+              glow:            s.cables?.glow         ?? DEFAULT_THEME.cables.glow,
+          },
+          background: {
+              image:           s.background?.image           ?? null,
+              parallax:        s.background?.parallax        ?? true,
+              parallaxStrength:s.background?.parallaxStrength ?? 20,
+          },
+          grid: {
+              multX:           s.grid?.multX ?? 1,
+              multY:           s.grid?.multY ?? 1,
+              snap:            s.grid?.snap  ?? true,
+              size:            s.grid?.size  ?? 4,
+          },
+      };
+  }
+
+  collectModulesForExport() {
+    console.log('Собираем данные модулей...');
+
+    // Фильтруем только панели (модули)
+    const panels = this.components.filter(
+      (c) => c instanceof Panel,
+    );
+
+    return panels.map((module) => {
+        const parameters = this.collectModuleParameters(module);
+
+        // ⭐ Библиотека модуля — из definition (проставляется ModuleFactory.loadModule)
+        const def = this.moduleFactory.moduleRegistry[module.jsonName || module.type];
+        const library = module.library || def?.library || null;
+
+        return {
+            name: module.jsonName || module.type || 'Unknown',
+            library,
+            id: module.jsonId || this.generateJsonId(module),
+            type: module.typeID || 0,
+            parameters: JSON.stringify(parameters),
+            modes: [],
+            area: (module.layer || 'voice').toUpperCase(),
+            hpos: module.gridX || 0,
+            vpos: module.gridY || 0,
+            coordinateSpace: 'world',
+            customColor: module.customColor || null,
+            midiMappings: this._collectMidiMappings(module),
+        };
+    });
+  }
+
+  /**
+   * Собрать MIDI-маппинги компонентов модуля.
+   * @returns {Array<{componentId: string, cc: number, channel: number}>}
+   */
+  _collectMidiMappings(module) {
+      const out = [];
+      if (!module.components) return out;
+      for (const comp of module.components) {
+          if (!comp.midiMapping) continue;
+          out.push({
+              componentId: String(comp.id),
+              cc: comp.midiMapping.cc,
+              channel: comp.midiMapping.channel,
+          });
+      }
+      return out;
+  }
+
+  collectModuleParameters(module) {
+    const params = [];
+
+    // ⭐ Только параметрические компоненты (Knob / Slider / Button* / PartSelector / TextEdit).
+    //    TextLabel, Input, Output, LED, MiniVU, TextField — не параметры.
+    const INTERACTIVE_TYPES = new Set([
+      'Knob', 'Slider',
+      'ButtonFlat', 'ButtonRadio', 'ButtonIncDec', 'ButtonText',
+      'PartSelector', 'TextEdit',
+    ]);
+
+    module.components.forEach((component) => {
+      const type = component.constructor?.name;
+      if (!INTERACTIVE_TYPES.has(type)) return;
+      if (component.parameterId === undefined) return;
+
+      const index = component.parameterId;
+      let value = 0;
+      if (component.getValue) value = component.getValue();
+      else if (component.value !== undefined) value = component.value;
+      else if (component.currentValue !== undefined) value = component.currentValue;
+      else if (component.selectedIndex !== undefined) value = component.selectedIndex;
+
+      params[index] = value;
+    });
+
+    // Заполняем пропуски нулями
+    for (let i = 0; i < params.length; i++) {
+      if (params[i] === undefined) params[i] = 0;
+    }
+
+    return params;
+  }
+
+  collectCablesForExport() {
+    //console.log('Собираем данные кабелей...');
+
+    return this.patchManager.cables
+      .map((cable) => {
+        const fromModule = cable.fromJack?.parentModule;
+        const toModule = cable.toJack?.parentModule;
+
+        if (!fromModule || !toModule) {
+          //console.warn('Кабель без модулей, пропускаем');
+          return null;
+        }
+
+        // Получаем ConnectorIndex джеков (НЕ component.id!)
+        const fromConnectorIndex = this.getComponentJsonId(cable.fromJack);
+        const toConnectorIndex = this.getComponentJsonId(cable.toJack);
+
+        // Определяем pin по типу джека
+        const fromPin =
+          cable.fromJack.constructor?.name === 'Output' ? 'out' : 'in';
+        const toPin = cable.toJack.constructor?.name === 'Input' ? 'in' : 'out';
+
+        //console.log(`Кабель: ${fromModule.jsonName}[${fromConnectorIndex}] → ${toModule.jsonName}[${toConnectorIndex}]`);
+        //console.log(`  From: ${cable.fromJack.constructor.name} id=${cable.fromJack.id}, ConnectorIndex=${fromConnectorIndex}`);
+        //console.log(`  To: ${cable.toJack.constructor.name} id=${cable.toJack.id}, ConnectorIndex=${toConnectorIndex}`);
+
+        return {
+          from: {
+            module: fromModule.jsonName || fromModule.type,
+            id: fromModule.jsonId,
+            jack: fromConnectorIndex, // ← ConnectorIndex!
+            pin: fromPin,
+          },
+          to: {
+            module: toModule.jsonName || toModule.type,
+            id: toModule.jsonId,
+            jack: toConnectorIndex, // ← ConnectorIndex!
+            pin: toPin,
+          },
+          color: cable.typeColor, // Функциональный цвет
+          customColor: cable.visualColor,
+          type: 'out-in',
+          area: (fromModule.layer || 'voice').toUpperCase(),
+        };
+      })
+      .filter((cable) => cable !== null);
+  }
+
+  getComponentJsonId(component) {
+      if (!component ||
+          component.ConnectorIndex === undefined ||
+          component.ConnectorIndex === null) {
+          console.warn(`Компонент не имеет ConnectorIndex:`, component);
+          return 0;
+      }
+      return parseInt(component.ConnectorIndex) || 0;
+  }
+
+  getColorName(colorHex) {
+    // Простое преобразование hex в имя
+    const colorMap = {
+      '#ef4444': 'red',
+      '#ff0000': 'red',
+      '#3b82f6': 'blue',
+      '#0000ff': 'blue',
+      '#fde047': 'yellow',
+      '#ffff00': 'yellow',
+      '#ffffff': 'white',
+    };
+
+    return colorMap[colorHex] || 'red';
+  }
+
+  generateJsonId(module) {
+      const existingIds = this.components
+          .filter(c => c.jsonId && c !== module)
+          .map(c => c.jsonId);
+
+      // ⭐ reduce вместо spread — безопасно на любом количестве модулей
+      let maxId = 0;
+      for (const id of existingIds) {
+          if (id > maxId) maxId = id;
+      }
+      return maxId + 1;
+  }
+
+  savePatch(filename = null) {
+    try {
+      const patchData = this.exportPatchToJson();
+      const jsonString = JSON.stringify(patchData, null, 2);
+
+      // Если имя файла не передано, используем текущее
+      const actualFilename =
+        filename || this.currentPatchFilename || 'patch_export.json';
+
+      // Создаем файл для скачивания
+      const blob = new Blob([jsonString], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = actualFilename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      // Сохраняем имя файла
+      this.currentPatchFilename = actualFilename;
+
+      this.showNotification(`✅ Patch saved as ${actualFilename}`);
+
+      return true;
+    } catch (error) {
+      this.showNotification(`❌ Error saving patch: ${error.message}`);
+      return false;
+    }
+  }
+
+  savePatchAs() {
+    // Создаем диалог для ввода имени файла
+    const filename = prompt(
+      'Enter filename for patch:',
+      this.currentPatchFilename || 'my_patch.json',
+    );
+
+    if (filename) {
+      // Добавляем .json если его нет
+      const actualFilename = filename.endsWith('.json')
+        ? filename
+        : filename + '.json';
+      return this.savePatch(actualFilename);
+    }
+
+    return false;
+  }
+
+  async loadJsonPatch() {
+    try {
+      if (!this.patchLoader) {
+        console.error('❌ patchLoader is not available!');
+        this.showNotification('❌ System error: PatchLoader not initialized');
+        return false;
+      }
+
+      const result = await this.patchLoader.loadPatchFromFile();
+      if (result.success) {
+        // Сохраняем имя загруженного файла
+        this.currentPatchFilename = result.filename;
+
+        // Обновляем UI через UIManager
+        const moduleCount = this.components.filter(
+          (c) => c instanceof Panel,
+        ).length;
+        const cableCount = this.patchManager.cables.length;
+
+        if (this.uiManager && this.uiManager.updatePatchInfo) {
+          this.uiManager.updatePatchInfo(
+            result.filename,
+            moduleCount,
+            cableCount,
+          );
+        }
+
+        this.showNotification(`✅ Patch loaded: ${result.filename}`);
+        return true;
+      } else {
+        console.error('❌ loadPatchFromFile failed:', result.error);
+        this.showNotification(`❌ Error: ${result.error}`);
+        return false;
+      }
+    } catch (error) {
+      console.error('💥 Error in loadJsonPatch:', error);
+      console.error('   Stack:', error.stack);
+      this.showNotification(`❌ System error: ${error.message}`);
+      return false;
+    }
+  }
+
+  resetEverything() {
+    console.log('=== RESETTING EVERYTHING ===');
+    // в resetEverything()
+    import('./src/stickers/svgCache.js').then(({ releaseAll }) => releaseAll());
+    // Очищаем все массивы
+    this.components = [];
+    this.selectedModule = null;
+    this.activePanel = null;
+    this.currentPatchFilename = null; // Сбрасываем имя файла
+
+    this.stickers = [];
+    this.selectedSticker = null;
+
+    // Очищаем layerManager
+    if (this.layerManager) {
+      this.layerManager.layers.voice.modules = [];
+      this.layerManager.layers.fx.modules = [];
+    }
+
+    // Очищаем patchManager
+    if (this.patchManager) {
+      this.patchManager.clear();
+    }
+
+    // Обновляем UI
+    if (this.uiManager && this.uiManager.updatePatchInfo) {
+      this.uiManager.updatePatchInfo('New Patch', 0, 0);
+    }
+
+    this.csoundGen.reset();
+    // ⭐ Очищаем LED-каналы
+    if (this.csoundEngine) {
+        this.csoundEngine.clearLedChannels();
+    }
+
+    // ⭐ Очищаем осциллограф
+    if (this.scopeWindow) {
+        this.scopeWindow.channels.clear();
+        this.scopeWindow._renderChannelBar();
+        this.scopeWindow.hide();
+    }
+  }
+
+  generateModuleId() {
+    return Math.floor(Math.random() * 1000) + 1;
+  }
+
+  async addNewModule(moduleType, layerName, gridX = null, gridY = null) {
+    // Если переданы координаты — используем их
+    if (gridX !== null && gridY !== null) {
+      return this.addNewModuleAtPosition(moduleType, layerName, gridX, gridY);
+    }
+
+    // Иначе ищем свободное место
+    const freeSpace = this.findFreeSpace(
+        layerName,
+        PANEL_GRID_WIDTH,
+        2,
+        null,
+        null,
+        this.grid.multX,
+        this.grid.multY,
+    );
+    
+    if (!freeSpace) {
+      this.showNotification(
+        `❌ Нет места в слое ${layerName === 'voice' ? 'VA' : 'FX'}`,
+      );
+      return null;
+    }
+
+    // ⭐ Прилипаем к разрешённой сетке (multX/multY)
+    const snapped = this.grid.snapToGrid(
+      freeSpace.gridX * BASE_STEP_X,
+      freeSpace.gridY * BASE_STEP_Y,
+    );
+
+    return this.addNewModuleAtPosition(
+      moduleType,
+      layerName,
+      snapped.gridX,
+      snapped.gridY,
+    );
+  }
+
+  updatePatchInfo() {
+    if (this.uiManager && this.uiManager.elements.patchInfo) {
+      const moduleCount = this.components.filter(
+        (c) => c instanceof Panel,
+      ).length;
+      const cableCount = this.patchManager.cables.length;
+
+      // Можно обновить информацию о текущем патче
+      // или просто оставить как есть
+    }
+
+    // Если нужно обновлять счётчики в реальном времени
+    // можно добавить отдельный UI элемент
+  }
+
+  async removeModule(module) {
+      if (!module) return;
+
+      if (this.csoundEngine && module.components) {
+          const leds = module.components.filter(c => c.constructor.name === 'LED');
+          leds.forEach(led => {
+              if (led.sourceChannel) {
+                  this.csoundEngine.unregisterLedChannel(led.sourceChannel);
+                  //console.log(`💡 Unregistered LED channel: ${led.sourceChannel}`);
+              }
+          });
+
+          const mvus = module.components.filter(c => c.constructor.name === 'MiniVU');
+          mvus.forEach(mvu => {
+              if (mvu.sourceChannel) {
+                  this.csoundEngine.unregisterLedChannel(mvu.sourceChannel);
+                  //console.log(`📊 Unregistered MiniVU channel: ${mvu.sourceChannel}`);
+              }
+          });
+      }
+
+      // Удаляем из csound генератора
+      this.csoundGen.removeModule(
+          module.jsonId,
+          module.jsonName || module.type,
+          module.typeID,
+          module.layer,
+      );
+
+      // 1. Удаляем все кабели, подключенные к модулю
+      const cablesToRemove = this.patchManager.findCablesByModule(
+          module.moduleId,
+      );
+
+      cablesToRemove.forEach((cable) => {
+          this.patchManager.removeCable(cable, { force: true });
+      });
+
+      // 2. Удаляем из слоя через LayerManager
+      if (this.layerManager) {
+          this.layerManager.removeModuleFromLayer(module);
+      } else {
+          // Fallback для старого кода
+          if (module.layer && this.layers[module.layer]) {
+              const layer = this.layers[module.layer];
+              const index = layer.modules.indexOf(module);
+              if (index > -1) {
+                  layer.modules.splice(index, 1);
+              }
+          }
+      }
+
+      // 3. Удаляем из общего массива components
+      const compIndex = this.components.indexOf(module);
+      if (compIndex > -1) {
+          this.components.splice(compIndex, 1);
+      } else {
+          console.log(`   Module not found in components array`);
+      }
+
+      // Устанавливаем dirty-флаги для перерисовки
+      if (module.layer === 'voice') this._voiceDirty = true;
+      else if (module.layer === 'fx') this._fxDirty = true;
+      this._cablesDirty = true;
+
+      if (this.forceRedraw) {
+          this.forceRedraw();
+      }
+
+      // 4. Обновляем информацию о патче
+      this.updatePatchInfo();
+
+      // 5. Обновляем Csound если он запущен
+      if (this.csoundEngine.state === 'running') {
+          this._recompileDebounced();
+      }
+
+      // 6. Если это был выбранный модуль - снимаем выделение
+      if (this.selectedModule === module) {
+          this.deselectModule();
+      }
+      this.minimap?._markDirty(); 
+  }
+
+  bringModuleToFront(module) {
+    // Перемещаем модуль в конец массива (он будет рисоваться последним)
+    if (module.layer && this.layerManager.layers[module.layer]) {
+      const layer = this.layerManager.layers[module.layer];
+      const index = layer.modules.indexOf(module);
+      if (index > -1) {
+        layer.modules.splice(index, 1);
+        layer.modules.push(module);
+      }
+    }
+
+    // Также в общем массиве components
+    const index = this.components.indexOf(module);
+    if (index > -1) {
+      this.components.splice(index, 1);
+      this.components.push(module);
+    }
+  }
+
+  exportCsd() {
+    if (!this.csoundGen) {
+      console.error('❌ csoundGen not initialized');
+      return;
+    }
+
+    // Получаем полный .csd код
+    const csdCode = this.csoundGen.generateFullCsd();
+
+    // Имя файла: myPatch.csd (можно сделать динамическим позже)
+    const filename = 'myPatch.csd';
+
+    // Создаем и скачиваем файл
+    const blob = new Blob([csdCode], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    console.log(`✅ Exported ${filename}`);
+    this.showNotification(`✅ Exported ${filename}`);
+  }
+
+  // get lastMouseX() {
+  //     return this.eventManager?.lastMouseX || null;
+  // }
+
+  // get lastMouseY() {
+  //     return this.eventManager?.lastMouseY || null;
+  // }
+
+  set lastMouseX(value) {
+    if (this.eventManager) this.eventManager.lastMouseX = value;
+  }
+
+  set lastMouseY(value) {
+    if (this.eventManager) this.eventManager.lastMouseY = value;
+  }
+
+  isGridCellFree(
+    layerName,
+    gridX,
+    gridY,
+    gridWidth = 1,
+    gridHeight = 1,
+    excludeModule = null,
+  ) {
+    return this.layerManager.isGridCellFree(
+      layerName,
+      gridX,
+      gridY,
+      gridWidth,
+      gridHeight,
+      excludeModule,
+    );
+  }
+
+  findFreeSpace(
+      layerName,
+      gridWidth = 1,
+      gridHeight = 1,
+      startGridX = null,
+      startGridY = null,
+      stepX = 1,
+      stepY = 1,
+  ) {
+      return this.layerManager.findFreeSpace(
+          layerName,
+          gridWidth,
+          gridHeight,
+          startGridX,
+          startGridY,
+          stepX,
+          stepY,
+      );
+  }
+
+  showNotification(message) {
+    // Делегируем UIManager
+    this.uiManager.showNotification(message);
+  }
+
+  zoom(amount) {
+      const oldScale = this.scale;
+      this.scale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, this.scale + amount));
+
+      // если не сдвинулись — выходим, чтобы не дёргать offset
+      if (this.scale === oldScale) return;
+
+      const rect = this.canvas.getBoundingClientRect();
+      const centerX = rect.width / 2;
+      const centerY = rect.height / 2;
+
+      const scaleFactor = this.scale / oldScale;
+      this.offsetX = centerX - (centerX - this.offsetX) * scaleFactor;
+      this.offsetY = centerY - (centerY - this.offsetY) * scaleFactor;
+      this.forceRedraw();
+      this.updateZoomInfo();
+  }
+
+  resetZoom() {
+    this.scale = 1.0;
+    this.offsetX = 0;
+    this.offsetY = 0;
+    this.updateZoomInfo();
+  }
+
+  updateZoomInfo() {
+    this.uiManager.updateZoomInfo(this.scale);
+  }
+
+  animate() {
+      this.updateParallax();
+      const now = performance.now();
+
+      if (!this.lastFrameTime) this.lastFrameTime = now;
+      if (now - this.lastFrameTime < 22) {
+          requestAnimationFrame(() => this.animate());
+          return;
+      }
+      this.lastFrameTime = now;
+
+      if (!this.profiler) {
+          this.profiler = {
+              enabled: true,
+              marks: {},
+              times: {},
+              frameCount: 0,
+              lastLogTime: now,
+          };
+      }
+      this.profiler.frameCount = (this.profiler.frameCount || 0) + 1;
+
+      if (typeof this.startMeasure === 'function') this.startMeasure('total');
+
+      this.frameCount++;
+      this.layerManager.frameCounter = this.frameCount;
+
+      // ⭐ SHAPE — пока есть активные переходы
+      if (this.patchManager.hasActiveTransitions()) {
+          this.patchManager.updateShapes();
+          this._cablesDirty = true;
+          this._voiceDirty = true;
+          this._fxDirty = true;
+      }
+
+      // ⭐ hasDragging — включая pan
+      const hasDragging =
+          this.draggingComponent ||
+          this.patchManager.draggingCable?.isDragging ||
+          this.isPanning;
+
+      if (hasDragging) {
+          this._wasDragging = true;
+      }
+
+      const needsRedraw =
+          hasDragging ||
+          this._voiceDirty ||
+          this._fxDirty ||
+          this._cablesDirty ||
+          this._forceRedraw ||
+          this._stickerDirty ||
+          this._hasAnimatedStickers() || 
+          this.frameCount % 30 === 0;
+
+      // ⭐ Рисуем "modules" (сетка + VOICE + FX) ТОЛЬКО когда реально надо
+      const modulesNeedRedraw =
+          this._voiceDirty ||
+          this._fxDirty ||
+          hasDragging ||
+          this._forceRedraw ||
+          this.frameCount % 30 === 0;
+
+      if (modulesNeedRedraw) {
+          // === CLEAR ===
+          if (typeof this.startMeasure === 'function') this.startMeasure('clear');
+          this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+          if (typeof this.endMeasure === 'function') this.endMeasure('clear');
+
+          // === VOICE ===
+          if (typeof this.startMeasure === 'function') this.startMeasure('drawVoice');
+          this.drawLayer('voice');
+          if (typeof this.endMeasure === 'function') this.endMeasure('drawVoice');
+          this._voiceDirty = false;
+
+          // === FX ===
+          if (typeof this.startMeasure === 'function') this.startMeasure('drawFx');
+          this.drawLayer('fx');
+          if (typeof this.endMeasure === 'function') this.endMeasure('drawFx');
+          this._fxDirty = false;
+      }
+
+      // ⭐ STICKERS — отдельный слой, свой dirty-флаг
+      const stickerNeedsRedraw =
+          this._stickerDirty ||
+          hasDragging ||
+          this._forceRedraw ||
+          this._hasAnimatedStickers();
+
+      if (stickerNeedsRedraw) {
+          if (typeof this.startMeasure === 'function') this.startMeasure('stickers');
+          this._renderStickers();
+          if (typeof this.endMeasure === 'function') this.endMeasure('stickers');
+          this._stickerDirty = false;
+      }
+
+      // ⭐ OVERLAY: кабели и выделение
+      const overlayNeedsRedraw =
+          this._cablesDirty ||
+          hasDragging ||
+          this._forceRedraw ||
+          modulesNeedRedraw;   // если модули перерисованы — надо перерисовать и кабели (они на одном с ними слое)
+
+      if (overlayNeedsRedraw) {
+          if (this.selectedModule) {
+              this.drawModuleSelections();
+          }
+          this._renderCables();
+          this._cablesDirty = false;
+      }
+
+      // === DYNAMIC (LED, MiniVU, Graph) ===
+      this._renderDynamic();
+
+      // ⭐ Minimap — рисуем в экранных координатах, поверх всего
+      if (this.minimap && this.minimap.visible) {
+          this.minimap.draw();
+      }
+
+      if (typeof this.endMeasure === 'function') this.endMeasure('total');
+
+      if (this.frameCount % 60 === 0) {
+          this.updateFPS(now);
+      }
+
+      requestAnimationFrame(() => this.animate());
+  }
+
+  logPerformance() {
+    // Защита от отсутствия profiler
+    if (!this.profiler) return;
+
+    const now = performance.now();
+    const elapsed = now - (this.profiler.lastLogTime || now);
+
+    if (elapsed < 1000) return;
+
+    const times = this.profiler.times || {};
+    const frameCount = this.profiler.frameCount || 0;
+
+    // Сбрасываем счетчики
+    this.profiler.times = {
+      total: 0,
+      clear: 0,
+      drawVoice: 0,
+      drawFx: 0,
+      drawDivider: 0,
+      drawCables: 0,
+      stickers: 0, 
+    };
+    this.profiler.frameCount = 0;
+    this.profiler.lastLogTime = now;
+  }
+
+  updateFPS(now) {
+    if (this.lastFPSUpdate === undefined) {
+      this.lastFPSUpdate = now;
+      this.frameCount = 0;
+      return;
+    }
+
+    this.frameCount++;
+
+    if (now - this.lastFPSUpdate >= 1000) {
+      this.currentFPS = this.frameCount;
+      this.frameCount = 0;
+      this.lastFPSUpdate = now;
+    }
+  }
+
+  throttledUpdateUI = (() => {
+    let timeout;
+    return () => {
+      if (timeout) return;
+      timeout = setTimeout(() => {
+        this.updatePatchInfo();
+        timeout = null;
+      }, 100); // Не чаще чем раз в 100мс
+    };
+  })();
+
+    /**
+     * Загрузить модуль по имени: сначала user, потом все builtin-библиотеки.
+     * Возвращает true если модуль зарегистрирован в moduleFactory.
+     */
+  async _ensureModuleLoaded(moduleType, preferredLib = null) {
+      if (this.moduleFactory.moduleRegistry[moduleType]) return true;
+
+      // 1. preferred (из ContextMenu)
+      if (preferredLib && await this.moduleFactory.loadModule(preferredLib, moduleType)) {
+          return true;
+      }
+
+      // 2. Пробуем user
+      if (await this.moduleFactory.loadModule('user', moduleType)) return true;
+      
+      // 3. Все builtin из libraryStore
+      try {
+          const libs = await libraryStore.listLibraries();
+          for (const entry of libs) {
+              if (entry.source !== 'builtin') continue;
+              if (entry.name === preferredLib) continue;  
+              if (await this.moduleFactory.loadModule(entry.name, moduleType)) {
+                  return true;
+              }
+          }
+      } catch (e) {
+          console.warn('[main] _ensureModuleLoaded: libraryStore error', e);
+      }
+        return false;
+  }
+
+
+  async addNewModuleAtPosition(moduleType, layerName, gridX, gridY, opts = {}) {
+      if (this.locked) {
+          this.showNotification?.('🔒 Patch is locked');
+          return null;
+      }
+
+      try {
+        // 1. Проверяем слой
+        if (!layerName || !this.layerManager.layers[layerName]) {
+          console.error(`Ошибка: неверный слой ${layerName}`);
+          return;
+        }
+
+        // 2. Snap к разрешённой сетке (multX/multY)
+        if (this.grid.snap) {
+            const snapped = this.grid.snapToGrid(
+                gridX * BASE_STEP_X,
+                gridY * BASE_STEP_Y,
+            );
+            if (snapped.gridX !== gridX || snapped.gridY !== gridY) {
+                //console.log(`📐 Snapped: (${gridX}, ${gridY}) → (${snapped.gridX}, ${snapped.gridY})`);
+                gridX = snapped.gridX;
+                gridY = snapped.gridY;
+            }
+        }
+
+        // 3. Загрузка определения модуля через libraryStore
+        if (!this.moduleFactory.moduleRegistry[moduleType]) {
+            const loaded = await this._ensureModuleLoaded(moduleType,opts.library);
+            if (!loaded) {
+                this.showNotification(`❌ Модуль ${moduleType} не найден`);
+                return;
+            }
+        }
+
+        const moduleDef = this.moduleFactory.moduleRegistry[moduleType];
+        if (!moduleDef) {
+          console.error(`Definition not found for ${moduleType}`);
+          return;
+        }
+
+        const gridWidth = PANEL_GRID_WIDTH;
+        const gridHeight = moduleDef.gridHeight || 2;
+
+        // 5. Коллизия → свободное место
+        if (!this.isGridCellFree(layerName, gridX, gridY, gridWidth, gridHeight)) {
+          console.log(`❌ Position (${gridX}, ${gridY}) is occupied, searching nearby...`);
+
+          const freeSpace = this.findFreeSpace(
+              layerName,
+              gridWidth,
+              gridHeight,
+              gridX,
+              gridY,
+              this.grid.snap ? this.grid.multX : 1,
+              this.grid.snap ? this.grid.multY : 1,
+          );
+
+          if (!freeSpace) {
+            this.showNotification(
+              `❌ Нет места в слое ${layerName === 'voice' ? 'VA' : 'FX'}`,
+            );
+            return;
+          }
+
+          gridX = freeSpace.gridX;
+          gridY = freeSpace.gridY;
+
+          console.log(`✅ Found alternative position: (${gridX}, ${gridY})`);
+        }
+
+        // 7. Создаём модуль
+        const newModule = this.moduleFactory.createModule(
+          moduleType,
+          gridX,
+          gridY,
+          layerName,
+        );
+
+        if (newModule) {
+          newModule.layer = layerName;
+          newModule.parentSystem = this;
+          newModule.jsonId = this.generateJsonId(newModule);
+          newModule.jsonName = moduleType;
+
+          // ⭐ Пересоздаём csoundChannel с правильным jsonId
+          // (ModuleFactory создал канал с panel.moduleId — внутренний счётчик)
+          newModule.components.forEach(comp => {
+              if (comp.csoundChannel && comp.id !== undefined) {
+                  comp.csoundChannel =
+                      `module_${moduleType}_${newModule.jsonId}_${comp.id}`;
+                  if (comp.updateCsoundValue) {
+                      comp.updateCsoundValue(comp.getValue?.() ?? 0);
+                  }
+              }
+          });
+
+          this.csoundGen.addModule({
+            typeId: moduleType,
+            instanceId: newModule.jsonId,
+            instanceName: moduleType,
+            layer: layerName,
+            parameters: [],
+            mode: [],
+            defaultParams: moduleDef.defaultParams || [0],
+            defaultMode: moduleDef.mode || [],
+            inlets: moduleDef.inputs || 1,
+            outlets: moduleDef.outputs || 1,
+            isUser: moduleDef.isUser === true,
+          });
+          newModule.typeID = moduleType;
+          this.recomputeVariantUI();
+
+          this.layerManager.addModuleToLayer(newModule, layerName);
+          this.components.push(newModule);
+
+          if (this.patchLoader && this.patchLoader.moduleMap) {
+            this.patchLoader.moduleMap.byId[newModule.jsonId] = newModule;
+            this.patchLoader.moduleMap.byLayer[layerName].push(newModule);
+          }
+
+          // 8. Регистрируем LED/MiniVU каналы
+          if (this.csoundEngine && newModule.components) {
+              const leds = newModule.components.filter(c => c.constructor.name === 'LED');
+              leds.forEach(led => {
+                  if (led.sourceComponentId === null || led.sourceComponentId === undefined) return;
+                  const channelName = `led_${moduleType}_${newModule.jsonId}_${led.id}`;
+                  led.sourceChannel = channelName;
+                  this.csoundEngine.registerLedChannel(channelName);
+                  //console.log(`💡 Registered LED channel: ${channelName}`);
+              });
+
+              const mvus = newModule.components.filter(c => c.constructor.name === 'MiniVU');
+              mvus.forEach(mvu => {
+                  if (mvu.sourceComponentId === null || mvu.sourceComponentId === undefined) return;
+                  const channelName = `mvu_${moduleType}_${newModule.jsonId}_${mvu.id}`;
+                  mvu.sourceChannel = channelName;
+                  this.csoundEngine.registerLedChannel(channelName);
+                  //console.log(`📊 Registered MiniVU channel: ${channelName}`);
+              });
+          }
+
+          this.sortComponentsByZIndex();
+          this.minimap?._markDirty(); 
+          if (layerName === 'voice') this._voiceDirty = true;
+          else this._fxDirty = true;
+          this._cablesDirty = true;
+
+          if (this.csoundEngine.state === 'running') {
+              this._recompileDebounced();
+          }
+        }
+      } catch (error) {
+        console.error(`Ошибка при создании модуля ${moduleType}:`, error);
+        this.showNotification(`❌ Ошибка: ${error.message}`);
+      }
+  }
+
+  /**
+   * Hot-reload всех user-модулей, стоящих в текущем патче.
+   *  - Перечитывает user-библиотеки.
+   *  - Обновляет каждую панель через moduleFactory.refreshPanel.
+   *  - Удаляет кабели удалённых джеков.
+   *  - Сбрасывает UDO-кэш CsoundGenerator для затронутых типов.
+   *  - Перекомпилирует ORC.
+   *
+   * Builtin-модули не трогаются (они read-only).
+   */
+  async reloadUserModules() {
+      const { libraryStore } = await import('./src/api/index.js');
+      libraryStore.invalidateCache?.();
+      this.csoundGen.invalidateUdoCache();
+      // 1. Собрать user-модули, стоящие в патче
+      const panels = this.components.filter(
+          c => c instanceof Panel && c.library && c.library !== 'builtin'
+      );
+      if (panels.length === 0) {
+          this.showNotification?.('📭 No user modules in patch');
+          return { reloaded: 0, failed: 0 };
+      }
+
+      // Уникальные пары (library, type)
+      const targets = new Map();   // key: `${lib}/${type}`
+      for (const p of panels) {
+          const lib = p.library;
+          const type = p.jsonName || p.type || p.title;
+          targets.set(`${lib}/${type}`, { lib, type });
+      }
+
+      // 2. Перечитать definition'ы и обновить реестр + панели
+      let reloaded = 0, failed = 0;
+      const affectedTypes = new Set();
+      const removedJackCables = [];
+
+      for (const { lib, type } of targets.values()) {
+          const ok = await this.moduleFactory.loadModule(lib, type);
+          if (!ok) { failed++; continue; }
+
+          const newDef = this.moduleFactory.moduleRegistry[type];
+          if (!newDef) { failed++; continue; }
+
+          affectedTypes.add(type);
+
+          // Обновляем все панели этого типа
+          const matching = panels.filter(
+              p => (p.jsonName || p.type || p.title) === type && p.library === lib
+          );
+
+          for (const panel of matching) {
+              const { removed } = this.moduleFactory.refreshPanel(panel, newDef);
+
+              // Кабели удалённых компонентов — собрать id
+              for (const comp of removed) {
+                  const isJack = comp.constructor.name === 'Input'
+                              || comp.constructor.name === 'Output';
+                  if (isJack) removedJackCables.push({ panel, comp });
+              }
+
+              // ⭐ Пересобрать csoundChannel с правильным jsonId
+              //    (как в PatchLoader.configureModule)
+              if (this.csoundGen) {
+                  const instanceId = panel.jsonId;
+                  const instanceName = panel.jsonName || type;
+                  for (const comp of panel.components) {
+                      if (comp.csoundChannel && comp.id !== undefined) {
+                          comp.csoundChannel =
+                              `module_${instanceName}_${instanceId}_${comp.id}`;
+                      }
+                  }
+
+                  // Обновить запись модуля в CsoundGenerator
+                  // (inlets/outlets/params могли измениться)
+                  const def = this.moduleFactory.moduleRegistry[type];
+                  this.csoundGen.removeModule(
+                      instanceId, instanceName, type, panel.layer
+                  );
+                  this.csoundGen.addModule({
+                      typeId: type,
+                      instanceId,
+                      instanceName,
+                      layer: panel.layer,
+                      parameters: [],
+                      mode: [],
+                      defaultParams: def?.defaultParams || [],
+                      defaultMode: def?.mode || [],
+                      inlets: def?.inputs || 1,
+                      outlets: def?.outputs || 1,
+                      isUser: true,
+                  });
+              }
+
+              panel.setDirty?.(true);
+              reloaded++;
+          }
+      }
+
+      // 3. Удалить кабели удалённых джеков
+      for (const { comp } of removedJackCables) {
+          const cables = (this.patchManager?.cables || [])
+              .filter(c => c.fromJack === comp || c.toJack === comp);
+          for (const cable of cables) {
+              this.patchManager.removeCable(cable);
+          }
+      }
+
+      // 4. Сбросить UDO-кэш в CsoundGenerator (заставить перечитать txt)
+      if (this.csoundGen) {
+          if (this.csoundGen._variantsCache) {
+              for (const type of affectedTypes) {
+                  // Ключ кэша — udoPath "library/<lib>/<type>.txt"
+                  for (const key of Object.keys(this.csoundGen._variantsCache)) {
+                      if (key.endsWith(`/${type}.txt`)) {
+                          delete this.csoundGen._variantsCache[key];
+                      }
+                  }
+              }
+          }
+      }
+
+      // 5. Перерисовать
+      this._voiceDirty = true;
+      this._fxDirty = true;
+      this._cablesDirty = true;
+      this.forceRedraw?.();
+      this.minimap?._markDirty();  
+
+      // ⭐ recomputeVariantUI сам триггерит recompile (см. AI Context.md)
+      if (typeof this.recomputeVariantUI === 'function') {
+          try {
+              await this.recomputeVariantUI();
+          } catch (e) {
+              console.warn('[reloadUserModules] recomputeVariantUI failed:', e);
+              // fallback — явный recompile
+              if (this.csoundEngine?.state === 'running') {
+                  this._recompileDebounced?.();
+              }
+          }
+      } else if (this.csoundEngine?.state === 'running') {
+          // нет recomputeVariantUI — хотя бы перекомпилируем
+          this._recompileDebounced?.();
+      }
+
+      const msg = failed > 0
+          ? `🔄 Reloaded ${reloaded}, failed ${failed}`
+          : `🔄 Reloaded ${reloaded} user module(s)`;
+      this.showNotification?.(msg);
+      console.log('[reloadUserModules]', { reloaded, failed, affectedTypes: [...affectedTypes] });
+
+      return { reloaded, failed };
+  }
+
+
+  /**
+   * Найти "пол" для FX-модулей — ниже всех Voice.
+   * @returns {number} gridY, ниже которого должен быть FX-модуль
+   */
+  _getFxFloorY() {
+    const voiceLayer = this.layerManager?.layers?.voice;
+    if (!voiceLayer?.modules?.length) return 0;
+    
+    let maxVoiceY = 0;
+    for (const m of voiceLayer.modules) {
+      const bottom = m.gridY + m.gridHeight;
+      if (bottom > maxVoiceY) maxVoiceY = bottom;
+    }
+    
+    return maxVoiceY + 10;
+  }
+
+  /**
+   * Обработать входящий MIDI CC: применить ко всем выученным контролам.
+   */
+  _handleMidiCC(cc, value, channel) {
+      const panels = this.components.filter(c => c instanceof Panel);
+      for (const panel of panels) {
+          if (!panel.components) continue;
+          for (const comp of panel.components) {
+              const m = comp.midiMapping;
+              if (!m) continue;
+              if (m.cc !== cc) continue;
+              if (m.channel !== channel) continue;
+              comp.applyMidiValue?.(value);
+          }
+      }
+  }
+
+  _renderStickers() {
+      const ctx = this.stickerCtx;
+      if (!ctx) return;
+
+      // Очищаем весь sticker-слой
+      ctx.clearRect(0, 0, this.stickerCanvas.width, this.stickerCanvas.height);
+
+      if (this.stickers.length === 0) return;
+
+      ctx.save();
+      ctx.translate(this.offsetX, this.offsetY);
+      ctx.scale(this.scale, this.scale);
+
+      const nowMs = performance.now();
+
+      // Порядок: behind → front
+      for (const s of this.stickers) {
+          if (s.z === 'behind') drawSticker(ctx, s, nowMs);
+      }
+      for (const s of this.stickers) {
+          if (s.z === 'front') drawSticker(ctx, s, nowMs);
+      }
+
+      // Выделение стикера — тоже здесь (слой поверх стикеров, но под кабелями)
+      if (this.selectedSticker) {
+          drawStickerSelection(ctx, this.selectedSticker);
+      }
+
+      ctx.restore();
+  }
+
+  _renderCables() {
+      const ctx = this.overlayCtx;
+      if (!ctx) return;
+
+      ctx.clearRect(0, 0, this.overlayCanvas.width, this.overlayCanvas.height);
+
+      ctx.save();
+      ctx.translate(this.offsetX, this.offsetY);
+      ctx.scale(this.scale, this.scale);
+
+      // 1. Кабели
+      this.patchManager.cables.forEach((cable) => {
+          cable.draw(ctx);
+      });
+
+      // 2. ⭐ OVERLAY-компоненты (меню PartSelector и т.п.)
+      //    Рисуются ПОВЕРХ кабелей.
+      const layers = this.layerManager.layers;
+      ['voice', 'fx'].forEach(layerName => {
+          const layer = layers[layerName];
+          if (!layer) return;
+          layer.modules.forEach(module => {
+              if (!module.components) return;
+              module.components.forEach(comp => {
+                  if (comp._isNewDragging) return;
+                  if (typeof comp.drawOverlay === 'function') {
+                      comp.drawOverlay(ctx);
+                  }
+              });
+          });
+      });
+
+      ctx.restore();
+
+      // 3. Перетаскиваемый кабель — поверх всего
+      if (this.patchManager.draggingCable?.isDragging) {
+          this.patchManager.drawDraggingCable(
+              ctx,
+              this.offsetX,
+              this.offsetY,
+              this.scale,
+          );
+      }
+  }
+
+  drawModuleSelections() {
+      const ctx = this.overlayCtx;   // ⭐ было this.ctx
+      if (!ctx) return;
+
+      ctx.save();
+      ctx.translate(this.offsetX, this.offsetY);
+      ctx.scale(this.scale, this.scale);
+
+      this.components.forEach((panel) => {
+          if (panel.isSelected && panel.pixelX !== null && panel.pixelY !== null) {
+              ctx.fillStyle = 'rgba(0, 170, 255, 0.1)';
+              ctx.fillRect(
+                  panel.pixelX - 5,
+                  panel.pixelY - 5,
+                  panel.width + 10,
+                  panel.height + 10,
+              );
+          }
+      });
+
+      ctx.restore();
+  }
+
+  drawLayer(layerName) {
+      const layer = this.layerManager.getLayer(layerName);
+      if (!layer) return;
+
+      // Сетка рисуется ОДИН РАЗ в animate() ДО drawLayer — не здесь.
+
+      this.ctx.save();
+      this.ctx.translate(this.offsetX, this.offsetY);
+      this.ctx.scale(this.scale, this.scale);
+
+      // === ВИЗУАЛЬНАЯ ПОДСВЕТКА КОЛЛИЗИЙ ПРИ DRAG ===
+      if (
+          this.draggingComponent &&
+          this.draggingComponent.type === 'drag' &&
+          this.draggingComponent.module &&
+          this.draggingComponent.module.layer === layerName
+      ) {
+          const module = this.draggingComponent.module;
+
+          const worldX = (this.lastMouseX - this.offsetX) / this.scale;
+          const worldY = (this.lastMouseY - this.offsetY) / this.scale;
+
+          // Snap через grid
+          const snapped = this.grid.snapToGrid(worldX, worldY);
+          const targetGridX = snapped.gridX - module.dragOffsetGridX;
+          const targetGridY = snapped.gridY - module.dragOffsetGridY;
+
+          const isFree = this.isGridCellFree(
+              layerName,
+              targetGridX,
+              targetGridY,
+              module.gridWidth,
+              module.gridHeight,
+              module,
+          );
+
+          // Пиксельные координаты целевой позиции
+          const pixelX = targetGridX * BASE_STEP_X;
+          const pixelY = targetGridY * BASE_STEP_Y;
+
+          // 1. Призрак
+          this.ctx.save();
+          this.ctx.globalAlpha = 0.3;
+          this.ctx.fillStyle = isFree ? '#00ff00' : '#ff0000';
+          this.ctx.fillRect(pixelX, pixelY, module.width, module.height);
+          this.ctx.restore();
+
+          // 2. Контур
+          this.ctx.strokeStyle = isFree ? '#00ff00' : '#ff0000';
+          this.ctx.lineWidth = 2;
+          this.ctx.setLineDash([5, 5]);
+          this.ctx.strokeRect(pixelX, pixelY, module.width, module.height);
+          this.ctx.setLineDash([]);
+
+          // 3. Текущая реальная позиция модуля
+          const currentPixelX = module.gridX * BASE_STEP_X;
+          const currentPixelY = module.gridY * BASE_STEP_Y;
+          this.ctx.strokeStyle = '#ffff00';
+          this.ctx.lineWidth = 3;
+          this.ctx.strokeRect(
+              currentPixelX,
+              currentPixelY,
+              module.width,
+              module.height,
+          );
+
+          // 4. Текст с координатами
+          this.ctx.fillStyle = isFree ? '#00ff00' : '#ff0000';
+          this.ctx.font = 'bold 12px Arial';
+          this.ctx.textAlign = 'center';
+          this.ctx.textBaseline = 'top';
+
+          if (isFree) {
+              this.ctx.fillText(
+                  `[${targetGridX}, ${targetGridY}] ✓`,
+                  pixelX + module.width / 2,
+                  pixelY + 5,
+              );
+          } else {
+              this.ctx.fillText(
+                  `[${targetGridX}, ${targetGridY}] ✗ BLOCKED`,
+                  pixelX + module.width / 2,
+                  pixelY + 5,
+              );
+              this.ctx.fillStyle = '#ffff00';
+              this.ctx.fillText(
+                  `Will return to [${module.lastValidGridX}, ${module.lastValidGridY}]`,
+                  pixelX + module.width / 2,
+                  pixelY + 25,
+              );
+          }
+      }
+
+      // === МОДУЛИ СЛОЯ ===
+      layer.modules.forEach((module) => {
+          // Grid → пиксели (мир бесконечный, слой без смещения)
+          const pixelX = module.gridX * BASE_STEP_X;
+          const pixelY = module.gridY * BASE_STEP_Y;
+
+          module.setPixelPosition(pixelX, pixelY);
+          module.draw(this.ctx);
+      });
+
+      this.ctx.restore();
+  }
+
+}
+
+let modularSystem; // Объявляем глобально
+
+
+window.debugModuleInfo = (index = 0) => {
+  if (!modularSystem || !modularSystem.components[index]) {
+    console.error('Module not found');
+    return;
+  }
+
+  const module = modularSystem.components[index];
+  console.log('=== DEBUG MODULE INFO ===');
+  console.log('Module:', module);
+  console.log('Title:', module.title);
+  console.log('Type:', module.type);
+  console.log('JSON Name:', module.jsonName);
+  console.log('JSON ID:', module.jsonId);
+  console.log('Module ID:', module.moduleId);
+  console.log('Layer:', module.layer);
+
+  // Проверяем определение
+  if (modularSystem.moduleFactory) {
+    const moduleType = module.jsonName || module.type;
+    const definition = modularSystem.moduleFactory.moduleRegistry[moduleType];
+    console.log('Definition:', definition);
+
+    if (definition) {
+      console.log('Definition keys:', Object.keys(definition));
+      console.log('Has typeID?', 'typeID' in definition);
+      console.log('Has type?', 'type' in definition);
+    }
+  }
+};
+
+window.debugAllModules = () => {
+  if (!modularSystem) return;
+
+  console.log('=== ALL MODULES ===');
+  modularSystem.components.forEach((module, i) => {
+    console.log(`[${i}] ${module.title || 'unnamed'}`, {
+      type: module.type,
+      jsonName: module.jsonName,
+      jsonId: module.jsonId,
+      moduleId: module.moduleId,
+    });
+  });
+};
+
+window.debugFactory = () => {
+  if (!modularSystem?.moduleFactory?.moduleRegistry) return;
+
+  console.log('=== MODULE FACTORY REGISTRY ===');
+  const registry = modularSystem.moduleFactory.moduleRegistry;
+
+  Object.keys(registry).forEach((key) => {
+    const def = registry[key];
+    console.log(`\n"${key}":`, {
+      displayName: def.displayName,
+      typeID: def.typeID,
+      type: def.type,
+      gridHeight: def.gridHeight,
+      components: def.components?.length || 0,
+    });
+  });
+};
+
+document.addEventListener('DOMContentLoaded', async () => {
+    // ⭐ Инициализируем тему ДО создания системы
+    await initCurrentTheme();
+    //console.log('✅ Theme initialized');
+
+    // ⭐ BUILD: читаем манифест shipped-библиотек и модулей
+    if (import.meta.env.PROD) {
+        try {
+             // Список shipped-библиотек (для будущего Шага 3)
+            const libsRes = await fetch('/libraries/_index.json');
+            if (libsRes.ok) {
+                const { libraries } = await libsRes.json();
+                window.__SHIPPED_LIBRARIES__ = libraries;
+                console.log(`[build] libraries: ${libraries.join(', ')}`);
+            }
+        } catch (e) {
+            console.warn('[build] failed to load libraries manifest:', e);
+        }
+    }
+    
+    modularSystem = new ModularSystem();
+    window.modularSystem = modularSystem;
+    window.system = modularSystem;  
+
+    // ⭐ Show splash (if needed) and WAIT for user to close it
+    // — the checkbox inside splash may change the start-patch preference,
+    //   so we must read it only AFTER splash closes.
+    const splashPromise = modularSystem.splash.maybeShowOnStartup();
+    if (splashPromise) await splashPromise;
+
+    if (getStartPatchPref() === 'open') {
+        const result = await modularSystem.patchLoader.loadBuiltinPatch('startup');
+        if (result.success) {
+            modularSystem.currentPatchFilename = result.filename;
+            modularSystem.showNotification(`✅ Demo patch loaded`);
+        } else {
+            console.warn('[startup] demo patch not loaded:', result.error);
+        }
+    }
+
+    // ⭐ MIDI: не автостартуем — браузер требует клик пользователя для разрешения.
+    // Запуск — через кнопку MIDI в BottomBar.
+    modularSystem.midiManager.onStateChange((state, info) => {
+        console.log(`[MIDI] state=${state}`, info);
+    });
+
+    // ⭐ MIDI → Csound (instr 3 — gkGate/gkNote)
+    modularSystem.midiManager.onMessage((evt) => {
+        // ⭐ MIDI Clock → BPM (если external)
+        if (evt.status === 0xF8 && modularSystem._bpmSource === 'external') {
+            const bpm = modularSystem.midiManager.getMidiClockBpm();
+            if (bpm) modularSystem._applyExternalBpm(bpm);
+        }
+
+        // ⭐ MIDI CC → выученные контролы
+        if ((evt.status & 0xF0) === 0xB0) {
+            const channel = (evt.status & 0x0F) + 1;
+            modularSystem._handleMidiCC(evt.data1, evt.data2, channel);
+        }
+
+        // обычная нота → Csound
+        const engine = modularSystem.csoundEngine;
+        if (!engine || engine.state !== 'running') return;
+        if (evt.status === 0xF8) return;   // clock doesn't go to Csound
+        engine.midiMessage(evt.status, evt.data1, evt.data2);
+    });
+
+    // ⭐ OSC + CSP-bridge
+    modularSystem.oscManager = new OscManager();
+    modularSystem.oscSettings = new OscSettingsPanel(modularSystem);
+    modularSystem.bottomBar._oscSettings = modularSystem.oscSettings;
+
+    // Автоподключение, если пользователь не отключал
+    const oscCfg = (() => {
+        try { return JSON.parse(localStorage.getItem('csmodular:osc') || 'null'); }
+        catch { return null; }
+    })();
+    if (oscCfg === null || oscCfg.autoConnect !== false) {
+        const url = oscCfg?.url || 'ws://127.0.0.1:8765/ws';
+        // ⭐ Автостарт: одна тихая попытка, без реконнекта.
+        // Если bridge не запущен — просто не подключаемся, никакого шума.
+        modularSystem.oscManager.connect(url, { silent: true, retry: false }).catch(() => {});
+    }
+
+    // ⭐ Управляющие команды /csp/... → UI
+    modularSystem.oscManager.onControl((msg) => {
+        try {
+            switch (msg.cmd) {
+                case 'main.reset':
+                    modularSystem.resetEverything();
+                    break;
+                case 'main.new':
+                    modularSystem.resetEverything();
+                    break;
+                case 'main.save':
+                    modularSystem.savePatch(msg.args?.filename);
+                    break;
+                case 'main.load':
+                    modularSystem.loadJsonPatch();
+                    break;
+                case 'main.csound.start':
+                    modularSystem.csoundEngine?.init?.();
+                    break;
+                case 'main.csound.stop':
+                    modularSystem.csoundEngine?.stop?.();
+                    break;
+                case 'module.add':
+                    if (msg.args?.type) {
+                        modularSystem.addNewModule(msg.args.type, msg.args.layer || 'voice');
+                    }
+                    break;
+                case 'module.remove': {
+                    const p = modularSystem.components.find(c => c.jsonId === msg.args?.id);
+                    if (p) modularSystem.removeModule(p);
+                    break;
+                }
+                case 'midi.send':
+                    modularSystem.midiManager?.send(
+                        msg.args.status | 0, msg.args.data1 | 0, msg.args.data2 | 0,
+                    );
+                    break;
+                case 'osc.send':
+                    modularSystem.oscManager.send(msg.args.address, msg.args.args || []);
+                    break;
+                default:
+                    console.log('[csp-cmd] unknown:', msg.cmd);
+            }
+        } catch (e) {
+            console.error('[csp-cmd] handler error:', e);
+        }
+    });
+
+  // Добавляем команды для дебага в консоли
+  window.debugSystem = () => {
+    console.log('=== DEBUG COMMANDS ===');
+    console.log('debugSystem() - показать это сообщение');
+    console.log('debugState() - состояние системы');
+    console.log('debugModules() - список модулей');
+    console.log('debugCables() - список кабелей');
+    console.log('debugLoadTestPatch() - загрузить тестовый патч');
+  };
+
+  window.debugState = () => {
+    console.log('=== SYSTEM STATE ===');
+    console.log(`Components: ${modularSystem.components.length}`);
+    console.log(`Cables: ${modularSystem.patchManager.cables.length}`);
+
+    // Layer info из layerManager
+    console.log('\n=== LAYERS (from layerManager) ===');
+    if (modularSystem.layerManager) {
+      Object.entries(modularSystem.layerManager.layers).forEach(
+        ([name, layer]) => {
+          console.log(`${name}: ${layer.modules.length} modules`);
+        },
+      );
+    }
+
+    // Module map НОВАЯ СТРУКТУРА
+    if (modularSystem.patchLoader?.moduleMap) {
+      console.log('\n=== MODULE MAP (NEW STRUCTURE) ===');
+      console.log(
+        `Total in byId: ${Object.keys(modularSystem.patchLoader.moduleMap.byId || {}).length}`,
+      );
+      console.log(
+        `Voice layer: ${(modularSystem.patchLoader.moduleMap.byLayer?.voice || []).length}`,
+      );
+      console.log(
+        `FX layer: ${(modularSystem.patchLoader.moduleMap.byLayer?.fx || []).length}`,
+      );
+
+      // Детали
+      console.log('\n=== DETAILS ===');
+      Object.entries(modularSystem.patchLoader.moduleMap.byId || {}).forEach(
+        ([id, module]) => {
+          console.log(
+            `  ${id}: ${module.jsonName || module.title} (layer: ${module.layer})`,
+          );
+        },
+      );
+    }
+
+    // Проверка целостности
+    console.log('\n=== INTEGRITY CHECK ===');
+    const panels = modularSystem.components.filter(
+      (c) => c instanceof Panel,
+    );
+    console.log(`Panels in components: ${panels.length}`);
+
+    panels.forEach((panel, i) => {
+      console.log(
+        `  [${i}] ${panel.title} (jsonId: ${panel.jsonId}, layer: ${panel.layer})`,
+      );
+    });
+  };
+
+  window.debugModules = () => {
+    console.log('=== MODULES ===');
+    modularSystem.components.forEach((comp, i) => {
+      if (comp instanceof Panel) {
+        console.log(
+          `[${i}] ${comp.title} (id: ${comp.moduleId}, jsonId: ${comp.jsonId})`,
+        );
+      }
+    });
+  };
+
+  window.debugModuleMap = () => {
+    console.log('=== MODULE MAP DETAILED ===');
+
+    if (!modularSystem.patchLoader?.moduleMap) {
+      console.log('❌ moduleMap not available');
+      return;
+    }
+
+    const map = modularSystem.patchLoader.moduleMap;
+
+    console.log(`📊 By ID (${Object.keys(map.byId || {}).length}):`);
+    Object.entries(map.byId || {}).forEach(([id, module]) => {
+      console.log(
+        `  ${id}: ${module.jsonName || module.title} (layer: ${module.layer})`,
+      );
+    });
+
+    console.log(`\n📊 By Layer Voice (${(map.byLayer?.voice || []).length}):`);
+    (map.byLayer?.voice || []).forEach((module) => {
+      console.log(`  ${module.jsonId}: ${module.jsonName || module.title}`);
+    });
+
+    console.log(`\n📊 By Layer FX (${(map.byLayer?.fx || []).length}):`);
+    (map.byLayer?.fx || []).forEach((module) => {
+      console.log(`  ${module.jsonId}: ${module.jsonName || module.title}`);
+    });
+  };
+
+  window.debugCables = () => {
+    console.log('=== CABLES ===');
+    modularSystem.patchManager.cables.forEach((cable, i) => {
+      const from = cable.fromJack?.parentModule?.title || 'unknown';
+      const to = cable.toJack?.parentModule?.title || 'unknown';
+      console.log(`[${i}] ${from} → ${to}`);
+    });
+  };
+
+  // Дебаг команды
+  window.debugLoadProcess = () => {
+    console.log('=== DEBUG LOAD PROCESS ===');
+    console.log('1. System state:');
+    console.log('   modularSystem:', !!modularSystem);
+    console.log('   patchLoader:', !!modularSystem?.patchLoader);
+    console.log('   patchManager:', !!modularSystem?.patchManager);
+    console.log('   uiManager:', !!modularSystem?.uiManager);
+
+    console.log('\n2. Testing file input directly...');
+
+    // Создаем тестовый файл input напрямую
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json,.pch2';
+
+    input.onchange = (e) => {
+      console.log('   File input triggered!');
+      console.log('   Files:', e.target.files);
+
+      if (e.target.files[0]) {
+        console.log(`   File: ${e.target.files[0].name}`);
+        console.log(`   Size: ${e.target.files[0].size}`);
+
+        // Пробуем прочитать файл
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          console.log('   FileReader loaded');
+          console.log(`   Content length: ${event.target.result.length}`);
+
+          try {
+            const json = JSON.parse(event.target.result);
+            console.log('   JSON parsed successfully');
+            console.log('   JSON structure:', {
+              modules: json.modules?.length,
+              cables: json.cables?.length,
+              filename: json.filename,
+            });
+          } catch (err) {
+            console.error('   JSON parse error:', err);
+          }
+        };
+
+        reader.onerror = (err) => {
+          console.error('   FileReader error:', err);
+        };
+
+        reader.readAsText(e.target.files[0]);
+      }
+    };
+
+    // Триггерим клик
+    console.log('   Triggering click...');
+    input.click();
+    console.log('   Click triggered (dialog should open)');
+  };
+
+  window.testPatchLoad = async () => {
+    console.log('=== TEST PATCH LOAD ===');
+
+    if (!modularSystem?.patchLoader?.loadPatch) {
+      console.error('❌ patchLoader.loadPatch not available');
+      return;
+    }
+
+    // Тестовый патч
+    const testPatch = {
+      filename: 'test.json',
+      modules: [
+        {
+          name: 'Digitizer',
+          id: 1,
+          type: 0,
+          parameters: '[0,0,0,0,0,0,0,0]',
+          modes: [],
+          area: 'VOICE',
+          hpos: 0,
+          vpos: 0,
+        },
+      ],
+      cables: [],
+      textpad: '',
+    };
+
+    try {
+      console.log('   Loading test patch...');
+      const result = await modularSystem.patchLoader.loadPatch(testPatch);
+      console.log('   Test patch load result:', result);
+      console.log('   System state after:', {
+        components: modularSystem.components.length,
+        cables: modularSystem.patchManager.cables.length,
+      });
+    } catch (error) {
+      console.error('💥 Test patch load failed:', error);
+      console.error('   Stack:', error.stack);
+    }
+  };
+
+  window.debugLoadTestPatch = async () => {
+    console.log('Loading test patch...');
+    const testPatch = {
+      filename: 'test.json',
+      modules: [
+        {
+          name: 'VCO',
+          id: 1,
+          type: 0,
+          parameters: '[0,0,0,0,0,0,0,0]',
+          modes: [],
+          area: 'VOICE',
+          hpos: 0,
+          vpos: 0,
+        },
+        {
+          name: 'VCF',
+          id: 2,
+          type: 0,
+          parameters: '[0,0,0,0,0,0,0,0]',
+          modes: [],
+          area: 'VOICE',
+          hpos: 1,
+          vpos: 0,
+        },
+      ],
+      cables: [],
+      textpad: '',
+    };
+
+    await modularSystem.loadPatchFromJson(testPatch);
+    console.log('Test patch loaded');
+    debugState();
+  };
+
+  console.log(
+    'ModularSystem initialized. Type debugSystem() for debug commands',
+  );
+});

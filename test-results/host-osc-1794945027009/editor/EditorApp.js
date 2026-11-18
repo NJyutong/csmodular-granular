@@ -1,0 +1,1345 @@
+// editor/EditorApp.js - обновлённая версия
+import {
+    deserializeComponents,
+    collectPorts,
+    createComponent,
+    ComponentRegistry,
+    hasCollisions,   
+    getTypeOf,
+} from './ComponentRegistry.js';
+
+
+import { EditorPanel } from './EditorPanel.js';
+import { ModulePropertiesWindow } from './ModulePropertiesWindow.js';
+import { CodeViewerWindow } from './CodeViewerWindow.js';
+import { ComponentPropertiesWindow } from './ComponentPropertiesWindow.js';
+import { showNotification } from './ui/Toast.js';
+
+import { Knob } from '../src/components/Knob.js';
+import { ButtonFlat } from '../src/components/ButtonFlat.js';
+import { ButtonRadio } from '../src/components/ButtonRadio.js';
+import { ButtonIncDec } from '../src/components/ButtonIncDec.js';
+import { ButtonText } from '../src/components/ButtonText.js';
+import { Slider } from '../src/components/Slider.js';
+import { TextLabel } from '../src/components/TextLabel.js';
+import { TextField } from '../src/components/TextField.js';
+import { TextEdit } from '../src/components/TextEdit.js';
+import { LevelShift } from '../src/components/LevelShift.js';
+import { LED } from '../src/components/LED.js';
+import { Input } from '../src/components/Input.js';
+import { Output } from '../src/components/Output.js';
+import { PartSelector } from '../src/components/PartSelector.js';
+import { SVG } from '../src/components/SVG.js';
+import { Line } from '../src/components/Line.js';
+import { Graph } from '../src/components/Graph.js';
+import { MiniVU } from '../src/components/MiniVU.js';
+
+import { MappingTables } from '../src/csound/MappingTables.js';
+
+const GRID_UNITS = {
+    X: 260,
+    Y: 15
+};
+
+const MIN_GRID_WIDTH = 1;
+const MIN_GRID_HEIGHT = 1;
+
+export class EditorApp {
+    constructor(canvas) {
+        this.canvas = canvas;
+        this.ctx = canvas.getContext('2d');
+        
+        this.width = 1200;
+        this.height = 800;
+        
+        this.zoom = 1;
+        this.zoomLevels = [1, 2, 3];
+        this.currentZoomIndex = 0;
+        
+        this.module = null;
+        this.components = [];
+        this.selectedComponent = null;
+        this.resizingCorner = null;
+        
+        // ⭐ Для drag-and-drop
+        this.draggingNewComponent = null;      // Компонент который перетаскиваем
+        this.draggingNewComponentType = null;  // Тип компонента
+        this.isDraggingNewComponent = false;
+        this.dropValid = false;                // Можно ли бросить
+        this.dropTargetModule = null;          // Целевой модуль
+        this.draggingExistingComponent = null;
+        this.dragOffsetX = 0;
+        this.dragOffsetY = 0;
+        this.dragStartRelX = 0;
+        this.dragStartRelY = 0;
+        
+        this.offsetX = 0;
+        this.offsetY = 0;
+        this.isPanning = false;
+        this.panStartX = 0;
+        this.panStartY = 0;
+        this.panStartOffsetX = 0;
+        this.panStartOffsetY = 0;
+
+        this.snapEnabled = true;
+        this.snapGridSize = 5; // размер ячейки микросетки в пикселях
+        this.showMicroGrid = true;
+
+        // uiManager создаётся в editor.js (EditorUIManager)
+        // до этого — заглушка для showNotification (код в animate/setupEvents)
+        this.uiManager = { showNotification, updateZoomInfo: () => {} };
+
+        this.propertiesWindow = new ModulePropertiesWindow(this);
+        this.codeViewerWindow = new CodeViewerWindow(this);
+        this.componentPropertiesWindow = new ComponentPropertiesWindow(this);
+
+        // ⚠️ Эти окна больше не отображаются, но их API (saveModule, _showMappingBrowser)
+        //    используется новыми панелями.
+        this.propertiesWindow.hide();
+        this.componentPropertiesWindow.hide();
+
+        // Убираем их DOM из body (если был добавлен)
+        if (this.propertiesWindow.windowElement?.parentNode) {
+            this.propertiesWindow.windowElement.parentNode.removeChild(
+                this.propertiesWindow.windowElement
+            );
+        }
+        if (this.componentPropertiesWindow.windowElement?.parentNode) {
+            this.componentPropertiesWindow.windowElement.parentNode.removeChild(
+                this.componentPropertiesWindow.windowElement
+            );
+        }
+        // ⭐ Mapping tables (для редактора)
+        this.mappingTables = new MappingTables();
+        this.mappingTables.load();
+        this.createDefaultModule();
+        this.animate();
+        this.setupEvents();
+    }
+
+    setupCanvas() {
+        // Размеры canvas теперь берутся из контейнера (слота dock'а)
+        this.canvas.style.display = 'block';
+        this.canvas.style.background = '#111';
+        this.canvas.style.border = 'none';
+        this.canvas.style.position = 'relative';
+
+        this._fitCanvasToContainer();
+        this._setupResizeObserver();
+    }
+
+    _fitCanvasToContainer() {
+        const parent = this.canvas.parentElement;
+        if (!parent) return;
+
+        const rect = parent.getBoundingClientRect();
+        const w = Math.max(100, Math.floor(rect.width));
+        const h = Math.max(100, Math.floor(rect.height));
+
+        if (this.canvas.width === w && this.canvas.height === h) return;
+
+        this.width = w;
+        this.height = h;
+        this.canvas.width = w;
+        this.canvas.height = h;
+        this.canvas.style.width = `${w}px`;
+        this.canvas.style.height = `${h}px`;
+
+        // Пересчитать offset модуля относительно нового размера
+        if (this.module) {
+            this.centerModuleInGrid();
+        }
+    }
+
+    _setupResizeObserver() {
+        if (this._resizeObserver) this._resizeObserver.disconnect();
+        this._resizeObserver = new ResizeObserver(() => {
+            this._fitCanvasToContainer();
+        });
+        this._resizeObserver.observe(this.canvas.parentElement);
+    }
+
+    createDefaultModule() {
+        const gridWidth = 1;
+        const gridHeight = 3;
+        
+        this.module = new EditorPanel(
+            0, 0,
+            gridWidth * GRID_UNITS.X,
+            gridHeight * GRID_UNITS.Y,
+            gridWidth,
+            gridHeight
+        );
+        this.module.title = 'New Module';
+        this.centerModuleInGrid();
+    }
+
+    centerModuleInGrid() {
+        if (!this.module) return;
+        
+        const moduleGridWidth = this.module.gridWidth;
+        const moduleGridHeight = this.module.gridHeight;
+        
+        const totalGridWidth = Math.floor(this.width / GRID_UNITS.X);
+        const totalGridHeight = Math.floor(this.height / GRID_UNITS.Y);
+        
+        let centerGridX = Math.floor((totalGridWidth - moduleGridWidth) / 2);
+        let centerGridY = Math.floor((totalGridHeight - moduleGridHeight) / 2);
+        
+        centerGridX = Math.max(0, centerGridX);
+        centerGridY = Math.max(0, centerGridY);
+        
+        this.module.x = centerGridX * GRID_UNITS.X;
+        this.module.y = centerGridY * GRID_UNITS.Y;
+        
+        const moduleScreenWidth = this.module.width * this.zoom;
+        const moduleScreenHeight = this.module.height * this.zoom;
+        
+        this.offsetX = (this.width - moduleScreenWidth) / 2 - this.module.x * this.zoom;
+        this.offsetY = (this.height - moduleScreenHeight) / 2 - this.module.y * this.zoom;
+    }
+
+    // ========== ДОБАВЛЕНИЕ КОМПОНЕНТОВ (НОВАЯ ВЕРСИЯ) ==========
+
+
+// editor/EditorApp.js - обновлённый startDraggingNewComponent()
+
+    startDraggingNewComponent(type, jackType = null) {
+        // ⭐ type приходит как ClassName (Knob, Slider, Input, Output, ...)
+        
+        const def = ComponentRegistry[type];
+        if (!def) {
+            console.warn('Unknown component type:', type, jackType);
+            return;
+        }
+        const size = def.paletteSize;
+        
+        // Получаем позицию для спавна
+        const panel = document.getElementById('editor-ui-panel');
+        let spawnX = 100;
+        let spawnY = 100;
+        
+        if (panel) {
+            const rect = panel.getBoundingClientRect();
+            const canvasRect = this.canvas.getBoundingClientRect();
+            const scaleX = this.width / canvasRect.width;
+            const scaleY = this.height / canvasRect.height;
+            
+            spawnX = (rect.left - canvasRect.left) * scaleX;
+            spawnY = (rect.bottom - canvasRect.top) * scaleY + 10;
+            
+            spawnX = (spawnX - this.offsetX) / this.zoom;
+            spawnY = (spawnY - this.offsetY) / this.zoom;
+        }
+        
+        // ⭐ Передаём jackType в createComponentInstance
+        const component = this.createComponentInstance(
+            type, 
+            spawnX - size.width/2, 
+            spawnY - size.height/2, 
+            size,
+            jackType  // ← передаём тип джека
+        );
+        if (!component) return;
+        
+        this.draggingNewComponent = component;
+        this.draggingNewComponentType = type;
+        this.isDraggingNewComponent = true;
+        this.dropValid = false;
+        this.dropTargetModule = null;
+        
+        this.components.push(component);
+        
+        if (this.codeViewerWindow && this.codeViewerWindow.isVisible) {
+            this.codeViewerWindow.updateCode();
+        }
+        
+        console.log(`🔄 Started dragging: ${type} (${jackType || 'default'})`);
+    }
+    // Получает позицию для спавна (рядом с модулем)
+    getSpawnPosition(width, height) {
+        if (!this.module) {
+            return { x: 100, y: 100 };
+        }
+
+        // Спавним справа от модуля
+        const spawnX = this.module.x + this.module.width + 20;
+        const spawnY = this.module.y + 20;
+        
+        // Проверяем, не выходит ли за пределы canvas
+        const maxX = this.width / this.zoom - width;
+        const maxY = this.height / this.zoom - height;
+        
+        return {
+            x: Math.min(spawnX, maxX),
+            y: Math.min(spawnY, maxY)
+        };
+    }
+
+    createComponentInstance(type, x, y, size, jackType = null) {
+        const opts = { x, y };
+        if (type === 'Input' || type === 'Output') {
+            opts.jackType = jackType || 'audio';
+        }
+        
+        const component = createComponent(type, opts);
+        if (!component) return null;
+        
+        component.id = this._generateComponentId().toString();
+        component.originalID = component.id;
+        component.parameterId = parseInt(component.id);
+        
+        // ⭐ NEW: для auto-size компонентов (TextLabel) НЕ перезаписываем размеры
+        const def = ComponentRegistry[type];
+        if (!def?.autoSize) {
+            component.width = size.width;
+            component.height = size.height;
+        }
+        
+        component.parent = this.module;
+        component._editorModule = this.module;
+        component._isNewDragging = true;
+
+        return component;
+    }
+
+    // ⭐ Генератор ID с переиспользованием
+    _nextComponentId = 1;
+    _availableIds = []; // Список освободившихся ID
+
+    _generateComponentId() {
+        // Если есть освободившиеся ID - используем их
+        if (this._availableIds.length > 0) {
+            // Сортируем по возрастанию и берём минимальный
+            this._availableIds.sort((a, b) => a - b);
+            return this._availableIds.shift();
+        }
+        // Иначе выдаём следующий
+        return this._nextComponentId++;
+    }
+
+    _releaseComponentId(id) {
+        // Добавляем ID в список освободившихся
+        if (!this._availableIds.includes(id)) {
+            this._availableIds.push(id);
+            console.log(`🔄 ID ${id} released, available: [${this._availableIds.join(', ')}]`);
+        }
+    }
+
+    // ⭐ Получить список всех ID компонентов
+    _getAllComponentIds() {
+        return this.components
+            .filter(c => !c._isNewDragging)
+            .map(c => parseInt(c.id))
+            .filter(id => !isNaN(id))
+            .sort((a, b) => a - b);
+    }
+
+
+    // ========== СОБЫТИЯ ==========
+
+    setupEvents() {
+        this.canvas.addEventListener('mousedown', (e) => this.onMouseDown(e));
+        this.canvas.addEventListener('mousemove', (e) => this.onMouseMove(e));
+        this.canvas.addEventListener('mouseup', (e) => this.onMouseUp(e));
+        this.canvas.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            this._onContextMenu(e);
+        });
+        this.canvas.addEventListener('dblclick', (e) => this.onDoubleClick(e));
+        
+        this.canvas.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            const rect = this.canvas.getBoundingClientRect();
+            const mouseX = (e.clientX - rect.left) * (this.width / rect.width);
+            const mouseY = (e.clientY - rect.top) * (this.height / rect.height);
+            
+            const oldZoom = this.zoom;
+            let newZoom;
+            
+            if (e.deltaY < 0) {
+                const nextIndex = Math.min(this.currentZoomIndex + 1, this.zoomLevels.length - 1);
+                if (nextIndex === this.currentZoomIndex) return;
+                this.currentZoomIndex = nextIndex;
+                newZoom = this.zoomLevels[nextIndex];
+            } else {
+                const prevIndex = Math.max(this.currentZoomIndex - 1, 0);
+                if (prevIndex === this.currentZoomIndex) return;
+                this.currentZoomIndex = prevIndex;
+                newZoom = this.zoomLevels[prevIndex];
+            }
+            
+            this.zoomAroundPoint(mouseX, mouseY, oldZoom, newZoom);
+            this.uiManager.updateZoomInfo(newZoom);
+        }, { passive: false });
+        
+        // Pan с средней кнопкой
+        this.canvas.addEventListener('mousedown', (e) => {
+            if (e.button === 1) {
+                e.preventDefault();
+                this.isPanning = true;
+                this.panStartX = e.clientX;
+                this.panStartY = e.clientY;
+                this.panStartOffsetX = this.offsetX;
+                this.panStartOffsetY = this.offsetY;
+                this.canvas.style.cursor = 'grabbing';
+            }
+        });
+        
+        document.addEventListener('mousemove', (e) => {
+            if (this.isPanning) {
+                const dx = e.clientX - this.panStartX;
+                const dy = e.clientY - this.panStartY;
+                this.offsetX = this.panStartOffsetX + dx;
+                this.offsetY = this.panStartOffsetY + dy;
+            }
+        });
+        
+        document.addEventListener('mouseup', (e) => {
+            if (e.button === 1) {
+                this.isPanning = false;
+                this.canvas.style.cursor = 'default';
+            }
+        });
+        
+        document.addEventListener('keydown', (e) => {
+            // ⭐ Не перехватываем клавиши, если фокус в input/textarea
+            const target = e.target;
+            const isEditable = target.tagName === 'INPUT' ||
+                              target.tagName === 'TEXTAREA' ||
+                              target.isContentEditable;
+            if (isEditable) return;
+
+            if (e.key === 'Delete' && this.selectedComponent) {
+                this.removeComponent(this.selectedComponent);
+            }
+            if (e.key === 'Escape' && this.isDraggingNewComponent) {
+                this.cancelDraggingNewComponent();
+            }
+            if (e.key === '=' || e.key === '+') {
+                e.preventDefault();
+                this.zoomIn();
+            }
+            if (e.key === '-') {
+                e.preventDefault();
+                this.zoomOut();
+            }
+            if (e.key === '0') {
+                e.preventDefault();
+                this.resetZoom();
+            }
+        });
+    }
+
+// editor/EditorApp.js - onMouseDown
+
+    onMouseDown(e) {
+        const rect = this.canvas.getBoundingClientRect();
+        const x = (e.clientX - rect.left) * (this.width / rect.width);
+        const y = (e.clientY - rect.top) * (this.height / rect.height);
+        
+        const worldX = (x - this.offsetX) / this.zoom;
+        const worldY = (y - this.offsetY) / this.zoom;
+
+        // ⭐ NEW: закрыть открытые меню, если клик мимо
+        for (const comp of this.components) {
+            if (comp._isNewDragging) continue;
+            if (typeof comp.closeIfClickOutside === 'function') {
+                comp.closeIfClickOutside(worldX, worldY);
+            }
+        }
+        
+        if (this.isDraggingNewComponent) return;
+        
+        if (this.module && this.module.isOnResizeCorner(worldX, worldY)) {
+            this.resizingCorner = {
+                startX: worldX,
+                startY: worldY,
+                startGridWidth: this.module.gridWidth,
+                startGridHeight: this.module.gridHeight
+            };
+            return;
+        }
+        
+        // ⭐ Проверяем компоненты для перетаскивания
+        for (let i = this.components.length - 1; i >= 0; i--) {
+            const comp = this.components[i];
+            if (comp._isNewDragging) continue;
+            
+            let isInside = false;
+            if (typeof comp.isPointInside === 'function') {
+                isInside = comp.isPointInside(worldX, worldY);
+            } else if (typeof comp.contains === 'function') {
+                isInside = comp.contains(worldX, worldY);
+            }
+            
+            if (isInside) {
+                this.selectedComponent = comp;
+                this.draggingExistingComponent = comp;
+                
+                // Переключаем на таб Component в панели свойств
+                if (this.propertiesPanel) {
+                    this.propertiesPanel.setTab('component');
+                }
+                this.dragOffsetX = worldX - comp.x;
+                this.dragOffsetY = worldY - comp.y;
+                
+                // Сохраняем исходные rel координаты
+                this.dragStartRelX = comp.relX;
+                this.dragStartRelY = comp.relY;
+                
+                // Z-order — отдельный массив, НЕ мутируем components[]
+                // (см. AI Context.md: params[] order = components[] order, never sort)
+                if (!this._zOrder) this._zOrder = [];
+                const zi = this._zOrder.indexOf(comp);
+                if (zi > -1) this._zOrder.splice(zi, 1);
+                this._zOrder.push(comp);
+                
+                return;
+            }
+        }
+        
+        if (this.module && this.module.isInside(worldX, worldY)) {
+            this.selectedComponent = null;
+            if (this.componentPropertiesWindow) {
+                this.componentPropertiesWindow.hide();
+            }
+        }
+    }
+
+    onMouseMove(e) {
+        const rect = this.canvas.getBoundingClientRect();
+        const x = (e.clientX - rect.left) * (this.width / rect.width);
+        const y = (e.clientY - rect.top) * (this.height / rect.height);
+        
+        const worldX = (x - this.offsetX) / this.zoom;
+        const worldY = (y - this.offsetY) / this.zoom;
+        
+        // ===== DRAG-AND-DROP НОВОГО КОМПОНЕНТА =====
+        if (this.isDraggingNewComponent && this.draggingNewComponent) {
+            const comp = this.draggingNewComponent;
+            
+            let newX = worldX - comp.width / 2;
+            let newY = worldY - comp.height / 2;
+            
+            // Прилипание к микросетке если включено
+            if (this.snapEnabled) {
+                newX = Math.round(newX / this.snapGridSize) * this.snapGridSize;
+                newY = Math.round(newY / this.snapGridSize) * this.snapGridSize;
+            }
+            
+            comp.x = newX;
+            comp.y = newY;
+            
+            // Проверка внутри модуля (без учёта заголовка)
+            const isInsideModule = this.module && 
+                comp.x >= this.module.x &&
+                comp.x + comp.width <= this.module.x + this.module.width &&
+                comp.y >= this.module.y &&
+                comp.y + comp.height <= this.module.y + this.module.height;
+            
+            // Проверка коллизий с другими компонентами
+            this.dropValid = isInsideModule && !this._hasCollision(comp);
+            this.dropTargetModule = isInsideModule ? this.module : null;
+            
+            this.canvas.style.cursor = this.dropValid ? 'copy' : 'not-allowed';
+            return;
+        }
+        
+        // ===== РЕСАЙЗ МОДУЛЯ =====
+        if (this.resizingCorner) {
+            const dx = worldX - this.resizingCorner.startX;
+            const dy = worldY - this.resizingCorner.startY;
+            
+            let newGridWidth = 1;
+            let newGridHeight = Math.round(
+                (this.resizingCorner.startGridHeight * GRID_UNITS.Y + dy) / GRID_UNITS.Y
+            );
+            
+            newGridWidth = Math.max(MIN_GRID_WIDTH, newGridWidth);
+            newGridHeight = Math.max(MIN_GRID_HEIGHT, newGridHeight);
+            
+            this.module.resize(newGridWidth, newGridHeight);
+
+            // ⭐ Обновляем Properties Panel, если открыт таб Module
+            if (this.propertiesPanel && this.propertiesPanel.activeTab === 'module') {
+                this.propertiesPanel._render();
+            }
+            
+            
+            // Обновляем позиции всех компонентов при ресайзе
+            for (const comp of this.components) {
+                if (comp._isNewDragging) continue;
+                // Ограничиваем компоненты внутри нового размера модуля
+                if (comp.x + comp.width > this.module.x + this.module.width) {
+                    comp.x = this.module.x + this.module.width - comp.width;
+                    if (comp.relX !== undefined) {
+                        comp.relX = comp.x - this.module.x;
+                    }
+                }
+                if (comp.y + comp.height > this.module.y + this.module.height) {
+                    comp.y = this.module.y + this.module.height - comp.height;
+                    if (comp.relY !== undefined) {
+                        comp.relY = comp.y - this.module.y;
+                    }
+                }
+            }
+            
+            return;
+        }
+        
+        // ===== ПЕРЕТАСКИВАНИЕ СУЩЕСТВУЮЩЕГО КОМПОНЕНТА =====
+        if (this.draggingExistingComponent) {
+            const comp = this.draggingExistingComponent;
+            
+            let newX = worldX - this.dragOffsetX;
+            let newY = worldY - this.dragOffsetY;
+            
+            // Прилипание к микросетке если включено
+            if (this.snapEnabled) {
+                newX = Math.round(newX / this.snapGridSize) * this.snapGridSize;
+                newY = Math.round(newY / this.snapGridSize) * this.snapGridSize;
+            }
+            
+            // Ограничиваем внутри модуля
+            newX = Math.max(this.module.x, Math.min(this.module.x + this.module.width - comp.width, newX));
+            newY = Math.max(this.module.y, Math.min(this.module.y + this.module.height - comp.height, newY));
+            
+            comp.x = newX;
+            comp.y = newY;
+            
+            // Обновляем rel координаты
+            comp.relX = newX - this.module.x;
+            comp.relY = newY - this.module.y;
+            
+            // Проверяем коллизии с другими компонентами
+            const hasCollision = this._hasCollision(comp);
+            this.canvas.style.cursor = hasCollision ? 'not-allowed' : 'grabbing';
+            return;
+        }
+        
+        // ===== ХОВЕР НАД КОМПОНЕНТАМИ =====
+        // Обновляем состояние hover для компонентов
+        for (const comp of this.components) {
+            if (comp._isNewDragging) continue;
+            if (typeof comp.handleMouseMove === 'function') {
+                comp.handleMouseMove(worldX, worldY);
+            }
+        }
+        
+        // Меняем курсор при наведении на компонент
+        let cursorChanged = false;
+        for (let i = this.components.length - 1; i >= 0; i--) {
+            const comp = this.components[i];
+            if (comp._isNewDragging) continue;
+            
+            let isInside = false;
+            if (typeof comp.isPointInside === 'function') {
+                isInside = comp.isPointInside(worldX, worldY);
+            } else if (typeof comp.contains === 'function') {
+                isInside = comp.contains(worldX, worldY);
+            }
+            
+            if (isInside) {
+                this.canvas.style.cursor = 'grab';
+                cursorChanged = true;
+                break;
+            }
+        }
+        
+        if (!cursorChanged && !this.isDraggingNewComponent && !this.draggingExistingComponent) {
+            this.canvas.style.cursor = 'default';
+        }
+    }
+
+    async _onContextMenu(e) {
+        const { showCanvasContextMenu, showComponentContextMenu } = await import('./ui/ModuleContextMenu.js');
+
+        const rect = this.canvas.getBoundingClientRect();
+        const x = (e.clientX - rect.left) * (this.width / rect.width);
+        const y = (e.clientY - rect.top) * (this.height / rect.height);
+
+        const worldX = (x - this.offsetX) / this.zoom;
+        const worldY = (y - this.offsetY) / this.zoom;
+
+        // Ищем компонент под курсором (topmost first)
+        for (let i = this.components.length - 1; i >= 0; i--) {
+            const comp = this.components[i];
+            if (comp._isNewDragging) continue;
+
+            let isInside = false;
+            if (typeof comp.isPointInside === 'function') {
+                isInside = comp.isPointInside(worldX, worldY);
+            } else if (typeof comp.contains === 'function') {
+                isInside = comp.contains(worldX, worldY);
+            }
+
+            if (isInside) {
+                showComponentContextMenu(this, comp, e.clientX, e.clientY);
+                return;
+            }
+        }
+
+        // Не на компоненте → меню canvas
+        showCanvasContextMenu(this, e.clientX, e.clientY);
+    }
+
+    restoreModuleFromData(moduleData, dspCode) {
+        
+        // ⭐ 1. Очищаем текущее состояние
+        this.components = [];
+        this._zOrder = [];
+        this.selectedComponent = null;
+        this._nextComponentId = 1;
+        this._availableIds = [];
+        
+        // ⭐ 2. Восстанавливаем размеры модуля
+        const gridWidth = moduleData.gridWidth || 1;
+        const gridHeight = moduleData.gridHeight || 3;
+        
+        this.module.gridWidth = gridWidth;
+        this.module.gridHeight = gridHeight;
+        this.module.width = gridWidth * GRID_UNITS.X;
+        this.module.height = gridHeight * GRID_UNITS.Y;
+        this.module.title = moduleData.displayName || moduleData.type || 'Module';
+        this.module.category = moduleData.category || 'custom';
+        this.module.status = moduleData.status || 'dev';   // ⭐ NEW
+        // ⭐ Цвет модуля из данных
+        if (moduleData.customColor) {
+            this.module.customColor = moduleData.customColor;
+        } else {
+            this.module.customColor = null;
+        }
+
+        const components = moduleData.components || [];
+        const restored = deserializeComponents(components, { module: this.module });
+        
+        for (const component of restored) {
+            this.components.push(component);
+            
+            // Обновляем счётчик ID
+            const id = parseInt(component.id);
+            if (!isNaN(id) && id >= this._nextComponentId) {
+                this._nextComponentId = id + 1;
+            }
+        }
+        this._zOrder = [...this.components];
+        // ⭐ 4. Центрируем модуль на экране
+        this.centerModuleInGrid();
+        
+        // ⭐ 5. Загружаем DSP-код в CodeViewerWindow
+        if (this.codeViewerWindow) {
+            const cv = this.codeViewerWindow;
+
+            let code;
+            if (dspCode) {
+                this.module._userCsoundCode = dspCode;
+                code = dspCode;
+            } else {
+                code = cv.generateCsoundCode();
+            }
+
+            cv.codeContent = code;
+            cv.editor.value = code;
+            cv.isDirty = false;
+            cv._lastValidBody = null;
+            cv.updateStatus('saved');
+
+            // 1. Эталон (нужен для сверки в onEditorInput)
+            cv._rebuildStructure();
+
+            // 2. Кэш по фактическому editor.value (dspCode может быть длиннее эталона)
+            const fresh = cv._rebuildStructureFromCurrent();
+            if (fresh) cv._structureCache = fresh;
+
+            // 3. UI
+            cv._updateGutter();
+            cv._updateHighlight();
+        }
+        
+        // ⭐ 6. Обновляем PropertiesWindow
+        if (this.propertiesWindow && this.propertiesWindow.isVisible) {
+            this.propertiesWindow.show();
+        }
+        
+        // ⭐ 7. Перерисовка (animate сам)
+    }
+
+    _createComponentFromData(compData) {
+        const result = deserializeComponents([compData], { module: this.module });
+        return result[0] || null;
+    }
+
+    onMouseUp(e) {
+        // ===== ЗАВЕРШЕНИЕ DRAG-AND-DROP НОВОГО КОМПОНЕНТА =====
+        if (this.isDraggingNewComponent && this.draggingNewComponent) {
+            if (this.dropValid && this.dropTargetModule) {
+                // Фиксируем компонент внутри модуля
+                const comp = this.draggingNewComponent;
+                
+                // Сохраняем относительные координаты
+                comp.relX = comp.x - this.module.x;
+                comp.relY = comp.y - this.module.y;
+                comp.parent = this.module;
+                comp._editorModule = this.module;
+                comp._isNewDragging = false;
+
+                if (this.codeViewerWindow && this.codeViewerWindow.isVisible) {
+                    this.codeViewerWindow.updateCode();
+                }
+                
+                console.log(`✅ Component placed at (${comp.relX}, ${comp.relY})`);
+                this.uiManager.showNotification(`✅ ${this.draggingNewComponentType} placed`);
+            } else {
+                // Удаляем компонент если не в зоне
+                const index = this.components.indexOf(this.draggingNewComponent);
+                if (index > -1) {
+                    this.components.splice(index, 1);
+                }
+                this.uiManager.showNotification('❌ Placement cancelled');
+            }
+            
+            // Сбрасываем состояние
+            this.isDraggingNewComponent = false;
+            this.draggingNewComponent = null;
+            this.draggingNewComponentType = null;
+            this.dropValid = false;
+            this.dropTargetModule = null;
+            this.canvas.style.cursor = 'default';
+        }
+        
+        // ===== ЗАВЕРШЕНИЕ ПЕРЕТАСКИВАНИЯ СУЩЕСТВУЮЩЕГО КОМПОНЕНТА =====
+        if (this.draggingExistingComponent) {
+            const comp = this.draggingExistingComponent;
+            
+            // Проверяем валидность позиции (внутри модуля)
+            const isValid = comp.x >= this.module.x &&
+                           comp.x + comp.width <= this.module.x + this.module.width &&
+                           comp.y >= this.module.y &&
+                           comp.y + comp.height <= this.module.y + this.module.height;
+            
+            // Проверяем коллизии с другими компонентами
+            const hasCollision = this._hasCollision(comp);
+            
+            // Если позиция невалидна или есть коллизия - возвращаем на исходную
+            if (!isValid || hasCollision) {
+                comp.x = this.module.x + this.dragStartRelX;
+                comp.y = this.module.y + this.dragStartRelY;
+                comp.relX = this.dragStartRelX;
+                comp.relY = this.dragStartRelY;
+                
+                if (!isValid) {
+                    this.uiManager.showNotification('⚠️ Component returned - outside module');
+                } else if (hasCollision) {
+                    this.uiManager.showNotification('⚠️ Component returned - collision detected');
+                }
+            } else {
+                // Фиксируем новую позицию
+                comp.relX = comp.x - this.module.x;
+                comp.relY = comp.y - this.module.y;
+                this.uiManager.showNotification('✅ Component moved');
+            }
+            
+            this.draggingExistingComponent = null;
+            this.dragOffsetX = 0;
+            this.dragOffsetY = 0;
+            this.dragStartRelX = 0;
+            this.dragStartRelY = 0;
+            this.canvas.style.cursor = 'default';
+        }
+        
+        // ===== ЗАВЕРШЕНИЕ РЕСАЙЗА =====
+        this.resizingCorner = null;
+    }
+
+    // Отмена перетаскивания
+    cancelDraggingNewComponent() {
+        if (this.isDraggingNewComponent && this.draggingNewComponent) {
+            const index = this.components.indexOf(this.draggingNewComponent);
+            if (index > -1) {
+                this.components.splice(index, 1);
+            }
+            
+            this.isDraggingNewComponent = false;
+            this.draggingNewComponent = null;
+            this.draggingNewComponentType = null;
+            this.dropValid = false;
+            this.dropTargetModule = null;
+            this.canvas.style.cursor = 'default';
+            
+            this.uiManager.showNotification('❌ Placement cancelled');
+        }
+    }
+
+    onDoubleClick(e) {
+        const rect = this.canvas.getBoundingClientRect();
+        const x = (e.clientX - rect.left) * (this.width / rect.width);
+        const y = (e.clientY - rect.top) * (this.height / rect.height);
+        
+        const worldX = (x - this.offsetX) / this.zoom;
+        const worldY = (y - this.offsetY) / this.zoom;
+        
+        // Проверяем двойной клик по компоненту
+        for (let i = this.components.length - 1; i >= 0; i--) {
+            const comp = this.components[i];
+            if (comp._isNewDragging) continue;
+            
+            let isInside = false;
+            if (typeof comp.isPointInside === 'function') {
+                isInside = comp.isPointInside(worldX, worldY);
+            } else if (typeof comp.contains === 'function') {
+                isInside = comp.contains(worldX, worldY);
+            }
+            
+            if (isInside) {
+                // TextEdit — встроенное редактирование
+                if (comp.constructor.name === 'TextEdit' && typeof comp.startEditing === 'function') {
+                    comp.startEditing();
+                    this.uiManager.showNotification('✏️ Editing text');
+                    return;
+                }
+
+                // ⭐ TextLabel — редактирование текста через prompt
+                if (comp.constructor.name === 'TextLabel') {
+                    const current = comp.text ?? '';
+                    const next = prompt('Label text:', current);
+                    if (next !== null && next !== current) {
+                        comp.text = next;
+                        if (typeof comp.updateDimensions === 'function') {
+                            comp.updateDimensions();
+                        }
+                        // ⚠️ Лейбл не идёт в Csound, updateCode() не обязателен,
+                        //    но если лейбл отображается в коде — вызываем
+                        if (this.codeViewerWindow) this.codeViewerWindow.updateCode();
+                        this.uiManager.showNotification(`📝 Label: "${next}"`);
+                    }
+                    return;
+                }
+
+                return;
+            }
+        }
+        
+        // Двойной клик по модулю
+        if (this.module && this.module.isInside(worldX, worldY)) {
+            this.editModuleTitle();
+        }
+    }
+
+    editModuleTitle() {
+        if (!this.module) return;
+
+        const currentTitle = this.module.title;
+        const newTitle = prompt('Enter module name:', currentTitle);
+
+        if (newTitle !== null && newTitle.trim() !== '') {
+            // Санитайз — как везде
+            let name = newTitle.trim().replace(/\s/g, '');
+            if (/^[0-9]/.test(name)) name = 'M' + name;
+            name = name.replace(/[^a-zA-Z0-9_]/g, '');
+            if (!name) name = 'NewModule';
+
+            this.module.title = name;
+
+            // Обновить Csound-код
+            if (this.codeViewerWindow) this.codeViewerWindow.updateCode();
+
+            // Обновить панель свойств, если открыт таб Module
+            if (this.propertiesPanel && this.propertiesPanel.activeTab === 'module') {
+                this.propertiesPanel._render();
+            }
+
+            this.uiManager.showNotification(`📝 Module renamed to: ${name}`);
+        }
+    }
+
+    // ========== ZOOM ==========
+
+    setZoom(level) {
+        const oldZoom = this.zoom;
+        const newZoom = level;
+        
+        if (this.module) {
+            const centerX = this.module.x + this.module.width / 2;
+            const centerY = this.module.y + this.module.height / 2;
+            
+            const screenCenterX = centerX * oldZoom + this.offsetX;
+            const screenCenterY = centerY * oldZoom + this.offsetY;
+            
+            this.zoom = newZoom;
+            this.offsetX = screenCenterX - centerX * newZoom;
+            this.offsetY = screenCenterY - centerY * newZoom;
+        } else {
+            this.zoom = newZoom;
+        }
+        
+        this.uiManager.updateZoomInfo(newZoom);
+    }
+
+    zoomIn() {
+        const nextIndex = Math.min(this.currentZoomIndex + 1, this.zoomLevels.length - 1);
+        if (nextIndex !== this.currentZoomIndex) {
+            this.currentZoomIndex = nextIndex;
+            this.setZoom(this.zoomLevels[nextIndex]);
+        }
+    }
+
+    zoomOut() {
+        const prevIndex = Math.max(this.currentZoomIndex - 1, 0);
+        if (prevIndex !== this.currentZoomIndex) {
+            this.currentZoomIndex = prevIndex;
+            this.setZoom(this.zoomLevels[prevIndex]);
+        }
+    }
+
+    resetZoom() {
+        this.currentZoomIndex = 0;
+        this.zoom = 1;
+        this.offsetX = 0;
+        this.offsetY = 0;
+        this.centerModuleInGrid();
+        this.uiManager.updateZoomInfo(1);
+    }
+
+    zoomAroundPoint(screenX, screenY, oldZoom, newZoom) {
+        const worldX = (screenX - this.offsetX) / oldZoom;
+        const worldY = (screenY - this.offsetY) / oldZoom;
+        this.zoom = newZoom;
+        this.offsetX = screenX - worldX * newZoom;
+        this.offsetY = screenY - worldY * newZoom;
+    }
+
+    // ========== УПРАВЛЕНИЕ КОМПОНЕНТАМИ ==========
+
+// editor/EditorApp.js - обновлённый removeComponent()
+// editor/EditorApp.js - добавьте этот метод
+
+    getComponentPorts() {
+        return collectPorts(this.components);
+    }
+    
+    removeComponent(component) {
+        const index = this.components.indexOf(component);
+        if (index > -1) {
+            // ⭐ Освобождаем ID для переиспользования
+            const id = parseInt(component.id);
+            if (!isNaN(id)) {
+                this._releaseComponentId(id);
+            }
+            
+            this.components.splice(index, 1);
+            this.selectedComponent = null;
+            this.uiManager.showNotification('🗑️ Component removed');
+        }
+    }
+
+    // EditorApp.js
+    clearModule(opts = {}) {
+        this.components = [];
+        this._zOrder = [];
+        this.selectedComponent = null;
+        this._nextComponentId = 1;
+        this._availableIds = [];
+
+        if (this.module) {
+            if (opts.title !== undefined) this.module.title = opts.title;
+            this.module.category = 'custom';
+            this.module.status = 'dev';   // ⭐ NEW
+            if (opts.resetColor) this.module.customColor = null;
+            this.module._userCsoundCode = null;
+        }
+
+        // Пересобрать панель кода
+        if (this.codeViewerWindow) {
+            const cv = this.codeViewerWindow;
+            const code = cv.generateCsoundCode();
+
+            cv.codeContent = code;
+            cv.editor.value = code;
+            cv.isDirty = false;
+            cv._lastValidBody = null;
+            cv.updateStatus('saved');
+
+            cv._rebuildStructure();
+            const fresh = cv._rebuildStructureFromCurrent();
+            if (fresh) cv._structureCache = fresh;
+            cv._updateGutter();
+            cv._updateHighlight();
+        }
+
+        if (this.propertiesPanel?.activeTab === 'module') {
+            this.propertiesPanel._render();
+        }
+
+        this.uiManager.showNotification('🆕 Module cleared');
+    }
+
+    // ========== ОТРИСОВКА ==========
+
+    animate() {
+        if (!this.width || !this.height) {
+            requestAnimationFrame(() => this.animate());
+            return;
+        }
+        this.ctx.clearRect(0, 0, this.width, this.height);
+
+        this.drawBackground();
+
+        this.ctx.save();
+        this.ctx.translate(this.offsetX, this.offsetY);
+        this.ctx.scale(this.zoom, this.zoom);
+
+        // 1. Модуль
+        if (this.module) {
+            this.module.draw(this.ctx);
+        }
+
+        // 2. Микросетка поверх модуля, под компонентами
+        if (this.showMicroGrid && this.module) {
+            this.drawMicroGrid(this.ctx);
+        }
+
+        // 3. Компоненты — рисуем по z-order, данные берём из components[]
+        //    ⭐ ВАЖНО: components[] НЕ мутируем (params[] order = components[] order).
+        //    Z-order — отдельный массив this._zOrder.
+        const drawList = [];
+        const seen = new Set();
+        if (this._zOrder && this._zOrder.length > 0) {
+            for (const c of this._zOrder) {
+                if (this.components.includes(c)) {
+                    drawList.push(c);
+                    seen.add(c);
+                }
+            }
+        }
+        for (const c of this.components) {
+            if (!seen.has(c)) drawList.push(c);
+        }
+
+        for (const comp of drawList) {
+            const isDragging = comp._isNewDragging === true;
+
+            if (isDragging) {
+                this.ctx.save();
+                this.ctx.globalAlpha = 0.8;
+            }
+
+            if (comp.relX !== undefined && comp.relY !== undefined && !isDragging) {
+                comp.x = this.module.x + comp.relX;
+                comp.y = this.module.y + comp.relY;
+            }
+
+            // ⭐ страховка для PartSelector.getMenuBounds()
+            comp._panelHeight = this.module.height;
+
+            if (typeof comp.draw === 'function') {
+                comp.draw(this.ctx);
+            }
+
+            if (isDragging) {
+                const color = this.dropValid ? '#00ff00' : '#ff0000';
+                this.ctx.strokeStyle = color;
+                this.ctx.lineWidth = 2 / this.zoom;
+                this.ctx.setLineDash([4 / this.zoom, 4 / this.zoom]);
+                this.ctx.strokeRect(
+                    comp.x - 2 / this.zoom,
+                    comp.y - 2 / this.zoom,
+                    comp.width + 4 / this.zoom,
+                    comp.height + 4 / this.zoom
+                );
+                this.ctx.setLineDash([]);
+                this.ctx.restore();
+            }
+        }
+
+        // 4. Resize-угол
+        if (this.module) {
+            this.module.drawResizeCorner(this.ctx);
+        }
+
+        // 5. Selection
+        if (this.selectedComponent && !this.selectedComponent._isNewDragging) {
+            this.drawSelection(this.selectedComponent);
+        }
+
+        this.ctx.restore();
+
+        // ⭐ 6. OVERLAY-ПРОХОД — меню PartSelector и прочие всплывашки
+        this.drawOverlays();
+
+        if (this.module) {
+            this.drawModuleSizeOutside();
+        }
+
+        this.drawZoomInfo();
+
+        requestAnimationFrame(() => this.animate());
+    }
+
+    /**
+     * Overlay-проход: всё, что должно быть ПОВЕРХ модулей.
+     * Сейчас — выпадающее меню PartSelector (и любых других компонентов
+     * с drawOverlay()).
+     */
+    drawOverlays() {
+        const ctx = this.ctx;
+
+        ctx.save();
+        // Меню рисуется в мировых координатах компонента,
+        // поэтому снова входим в мировую систему.
+        ctx.translate(this.offsetX, this.offsetY);
+        ctx.scale(this.zoom, this.zoom);
+
+        for (const comp of this.components) {
+            if (comp._isNewDragging) continue;
+            if (typeof comp.drawOverlay === 'function') {
+                comp.drawOverlay(ctx);
+            }
+        }
+
+        ctx.restore();
+    }
+
+    // ⭐ НОВЫЙ МЕТОД - рисует микросетку только внутри модуля
+    drawMicroGrid(ctx) {
+        if (!this.module) return;
+        
+        const step = this.snapGridSize;
+        const startX = this.module.x;
+        const startY = this.module.y;
+        const endX = this.module.x + this.module.width;
+        const endY = this.module.y + this.module.height;
+        
+        ctx.save();
+        
+        ctx.strokeStyle = 'rgba(0, 170, 255, 0.15)';
+        ctx.lineWidth = 0.5 / this.zoom;
+        
+        // Вертикальные линии только внутри модуля
+        for (let x = startX; x <= endX; x += step) {
+            ctx.beginPath();
+            ctx.moveTo(x, startY);
+            ctx.lineTo(x, endY);
+            ctx.stroke();
+        }
+        
+        // Горизонтальные линии только внутри модуля
+        for (let y = startY; y <= endY; y += step) {
+            ctx.beginPath();
+            ctx.moveTo(startX, y);
+            ctx.lineTo(endX, y);
+            ctx.stroke();
+        }
+        
+        ctx.restore();
+    }
+
+    // editor/EditorApp.js - drawBackground (убираем микросетку отсюда)
+
+    drawBackground() {
+        const ctx = this.ctx;
+        
+        ctx.fillStyle = '#111';
+        ctx.fillRect(0, 0, this.width, this.height);
+    }
+
+    drawModuleSizeOutside() {
+        if (!this.module) return;
+        
+        const ctx = this.ctx;
+        const info = `${this.module.gridWidth}×${this.module.gridHeight}`;
+        
+        const screenX = this.module.x * this.zoom + this.offsetX + this.module.width * this.zoom / 2;
+        const screenY = this.module.y * this.zoom + this.offsetY + this.module.height * this.zoom + 16 * this.zoom;
+        
+        ctx.save();
+        
+        ctx.font = `${10 * this.zoom}px monospace`;
+        const metrics = ctx.measureText(info);
+        const padding = 8 * this.zoom;
+        const bgWidth = metrics.width + padding * 2;
+        const bgHeight = 18 * this.zoom;
+        const bgX = screenX - bgWidth / 2;
+        const bgY = screenY - bgHeight / 2;
+        
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+        ctx.fillRect(bgX, bgY, bgWidth, bgHeight);
+        
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(info, screenX, screenY);
+        
+        ctx.restore();
+    }
+
+    drawZoomInfo() {
+        const ctx = this.ctx;
+        ctx.save();
+        
+        const text = `${this.zoom}x`;
+        const x = this.width - 60;
+        const y = 20;
+        
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+        ctx.fillRect(x - 10, y - 8, 50, 24);
+        
+        ctx.fillStyle = 'rgba(0, 170, 255, 0.8)';
+        ctx.font = '12px monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(text, x + 15, y + 4);
+        
+        ctx.restore();
+    }
+
+    /**
+     * Проверка коллизий компонента с другими.
+     * Ярлыки (noCollision) не проверяются и не мешают.
+     * @param {object} comp — компонент, который двигаем/ставим
+     * @param {number} x — новые мировые X
+     * @param {number} y — новые мировые Y
+     * @returns {boolean} true если есть коллизия
+     */
+    _hasCollision(comp, x = comp.x, y = comp.y) {
+        if (!hasCollisions(comp)) return false;   // сам ярлык — не проверяем
+        for (const other of this.components) {
+            if (other === comp) continue;
+            if (other._isNewDragging) continue;
+            if (!hasCollisions(other)) continue;  // ярлык не мешает
+            if (x < other.x + other.width &&
+                x + comp.width > other.x &&
+                y < other.y + other.height &&
+                y + comp.height > other.y) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    drawSelection(comp) {
+        const ctx = this.ctx;
+        ctx.save();
+        ctx.strokeStyle = '#0af';
+        ctx.lineWidth = 2 / this.zoom;
+        ctx.setLineDash([4 / this.zoom, 4 / this.zoom]);
+
+        const x = comp.x || 0;
+        const y = comp.y || 0;
+        const w = comp.width || comp.actualSize || 20;
+        const h = comp.height || comp.actualSize || 20;
+
+        // ⭐ auto-size компоненты (TextLabel) — без отступа
+        const def = ComponentRegistry[getTypeOf(comp)];
+        const pad = def?.autoSize ? 0 : 3;
+
+        ctx.strokeRect(
+            x - pad / this.zoom,
+            y - pad / this.zoom,
+            w + 2 * pad / this.zoom,
+            h + 2 * pad / this.zoom
+        );
+        ctx.setLineDash([]);
+        ctx.restore();
+    }
+}
