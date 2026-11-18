@@ -11,7 +11,8 @@
     "test:dsp": "node tests/dsp.mjs",
     "test:install": "node tests/install.mjs",
     "test:integration": "node tests/integration.mjs",
-    "test:system": "node tests/system-smoke.mjs"
+    "test:system": "node tests/system-smoke.mjs",
+    "test:dsp-node": "node --no-warnings tests/dsp-node.mjs"
   },
   "devDependencies": {
     "@csound/browser": "7.0.0-beta33",
