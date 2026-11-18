@@ -1,34 +1,35 @@
 # CsModular Granular Library
 
-**English** · [简体中文](README.zh-CN.md) · [Русский](README.ru.md)
+> [!NOTE]
+> **CsModular Granular · v1.1.0**
+> Three Csound-native modules share one grain engine and route through the host's Zak buses to Voice or FX. Grain Osc supports per-cycle phase warp and per-grain phase jitter; v1.1.0 also includes performance tuning and a refreshed interface.
+> The release source archive omits `tests/` and `test-results/`; the development branch `1.1` retains them.
 
-<p align="center">
-  <a href="https://github.com/gleb812/csmodular"><img src="https://img.shields.io/badge/Host-CsModular-2563EB?style=flat-square&logo=github&logoColor=white" alt="Host system: CsModular"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-059669?style=flat-square" alt="MIT License — Zhang Shengwei"></a>
-  <a href="csound/GrainCore.txt"><img src="https://img.shields.io/badge/DSP-Csound_Granular-7C3AED?style=flat-square" alt="Csound granular DSP"></a>
-</p>
+| Module | Source | Best for |
+|---|---|---|
+| **Grain Osc** | Built-in wavetable | Tunable grain clouds with phase warp and per-grain phase jitter |
+| **Grain Sample** | Imported WAV, slots 1–8 | Granular playback of recorded material |
+| **Grain Freeze** | Live input ring buffer | Freezing and reshaping recent audio |
 
-Original, patchable granular synthesis for CsModular. Grain scheduling, playback, interpolation, windows, random state and overlap mixing run entirely in Csound. The modules route through the host's Zak cable buses and connect to Voice or FX layers.
-
-## Panel workflow
-
-Panels follow the order you work in: **1 source/tone → 2 shape & randomness → 3 stereo output → Advanced**. Osc starts with Waveform, Phase warp and Pitch (a new Osc starts as a plain wave: warp 0, phase jitter 0); Sample starts with the file slot, position and Scan speed; Freeze starts with Record/Freeze and lookback. Controls that rarely change the result sit in Advanced. Osc's Phase warp reshapes each waveform cycle; Hold warp keeps its depth fixed. It reuses the old Position slot, so a patch saved with an older Grain Osc keeps its stored value as the warp depth and may sound slightly different. Phase jitter varies the wavetable start of each grain.
-
+Panels follow Source → Shape grains → Stereo output → Advanced. Freeze puts recording, lookback and wet mix first; Sample puts the file slot and position first; Osc puts pitch and wave phase first. Hold position and dry mixing for Sample/Osc are advanced controls; their dry input is optional. Leave advanced controls at their defaults when starting.
 
 ## First use
 
-Connect Grain Osc L/R to Outs2 L/R. Lower the volume and press ▶ to play.
+Click **Start here** at the top right, then **Load starter patch**. It loads Grain Osc → Outs2, with confirmation before replacing your patch. Save your work first. Lower speaker volume and press ▶ in the bottom bar. The guide covers cables, controls, saving and silence troubleshooting. Each panel now identifies its source. Grain window is a named Hann/Triangle selector; live Freeze offers Record/Freeze, while sample/osc offer Follow/Hold position. Parameter IDs and DSP routing remain compatible.
 
 
-## Language
+[中文](README.zh-CN.md) · [Русский](README.ru.md)
 
 The interface follows browser/system language preferences (Chinese, Russian, English fallback). Reload after changing language.
 
+An original Csound granular engine with three CsModular modules. Scheduling,
+voice playback, interpolation, windows, random state and overlap mixing all
+run in Csound. There is no built-in granular synthesizer in the DSP path.
+
 ## Layout and installation
 
-Host system: [CsModular](https://github.com/gleb812/csmodular).
-
-The granular plugin is maintained in this standalone repository; the CsModular host application is maintained separately.
+The editable plugin lives in `E:\paper\csmodular-granular`, independently of
+the host at `E:\paper\csmodular-main`. Both have local Git repositories.
 
 - `csound/GrainCore.txt`: the single shared DSP implementation.
 - `modules/GrainFreeze`, `GrainSample`, `GrainOsc`: matching `.js` UI / `.txt` UDO pairs.
@@ -43,8 +44,8 @@ The integration is already installed in the supplied host. After editing this
 plugin, synchronize it with:
 
 ```powershell
-node scripts/build-modules.mjs
-node scripts/install.mjs <path-to-csmodular-main>
+node E:/paper/csmodular-granular/scripts/build-modules.mjs
+node E:/paper/csmodular-granular/scripts/install.mjs E:/paper/csmodular-main
 ```
 
 The installer is idempotent and refuses incompatible integration changes.
@@ -53,7 +54,7 @@ and `GrainCore.txt`; they are not standalone opcodes for an unmodified editor ex
 
 ## Play
 
-1. Run `node scripts/host.mjs dev`, then open the displayed local URL.
+1. Run `node E:/paper/csmodular-granular/scripts/host.mjs dev`, then open the displayed local URL.
 2. Load `examples/granular-demo.json` with the patch Load control. Alternatively,
    press Space and choose the **Granular** library's modules.
 3. The example connects **Grain Osc L → Grain Freeze Audio in → Outs2 L/R**.
@@ -78,48 +79,35 @@ Audio cables are converted by the host before entering these static control jack
 |---|---|---|
 | Density | 0–200 grains/s; 0 lets existing voices finish | 100 grains/s |
 | Size | 2–500 ms; live grains may shorten for read/write safety | 250 ms |
-| Position / Phase warp | 0–127 maps to 0–1; live: recent → older safe history (about 4 s at 48 kHz); Sample: read position; Osc: phase-warp depth within each oscillator cycle. 0 leaves the selected wave unchanged; higher values reshape harmonic balance | 1 source span (live/sample); 1 normalized warp depth (Osc) |
-| Position jitter / Phase jitter | 0–127, maximum random displacement in source span; on Osc, varies the starting phase of each grain using Seed | 1 source span (live/sample); 1 cycle of phase jitter (Osc) |
+| Position | 0–127 maps to 0–1; live: recent → older safe history | 1 source span |
+| Pos jitter | 0–127, maximum random displacement in source span | 1 source span |
 | Pitch | −48…+48 semitones | 12 semitones |
 | Pitch jitter | 0–24 semitones, symmetric per grain | 12 semitones |
 | Window | 0 = Hann, 1 = triangle; threshold 0.5 | 1 |
 | Pan | 0 = left, 127 = right; equal-power gains | 1 normalized pan |
 | Spread | 0–127; random pan range up to ±0.5 | 1 normalized spread |
-| Freeze | threshold 0.5; Freeze module: stops live writes. Sample (labelled *Hold position*): pauses Scan and ignores Position changes. Osc (labelled *Hold warp*): holds the phase-warp amount | 1 |
-| Wet mix | 0–127, dry → wet (panel label: Dry/wet on Freeze, Grain/dry mix on Osc and Sample) | 1 normalized mix |
+| Freeze | threshold 0.5; stops live writes and holds source position | 1 |
+| Wet mix | 0–127, dry → wet | 1 normalized mix |
 | Level | 0–127, 0 → unity | 1 normalized level |
 | Seed | integer 0–65534, no CV; independent per instance | — |
-| Sample slot | 1–8, rounded to the nearest integer like the knob tooltip; Grain Sample only, no CV | — |
-| Scan | −100…+100 % of the file per second, 0 = stay at Position; Grain Sample only, no CV. Position moves by itself and wraps at the file ends; Hold pauses it | — |
-| Waveform | 0–3 (rounded like the tooltip) = sine, triangle, saw, square (one period, 220 Hz root); Grain Osc only, no CV. Saw/square use 24/23 harmonics, so they alias at high pitches | — |
+| Sample slot | integer 1–8; Grain Sample only, no CV | — |
 
-Ranges are clamped in Csound. Position or phase-warp depth, start position jitter, pitch,
-window, pan and size are captured at grain creation. Position CV scans new
-live/sample grains; Phase warp CV sets the depth for new Osc grains. In
-sample/osc mode Freeze holds the current position or warp amount; density, pitch
-and other controls remain live. The dry signal continues through Mix. Changing
-Seed resets only that instance's random sequence; restart the patch for identical
-scheduling too.
+Ranges are clamped in Csound. Position/Pitch/Window/Pan and size are captured
+at grain creation. Position CV scans subsequent grains without retuning active
+ones. In sample/osc mode Freeze holds Position; density, pitch and other controls
+remain live. The dry signal continues through Mix. Changing Seed resets only
+that instance's random sequence; restart the patch for identical scheduling too.
 
 ## Engine and routing
 
 The scheduler accumulates `density / sr` each sample and attempts one grain per
-crossing. Each instance owns 64 reusable slots. A full pool drops new triggers,
+crossing. Each instance owns 32 reusable slots. A full pool drops new triggers,
 without stealing or truncating active grains. Three Park–Miller random draws
-choose position (or Osc phase-warp depth), pitch and pan for each accepted trigger.
+choose position, pitch and pan for each accepted trigger.
 
-The core renders one control block (the host's `ksmps=4`) at a time. The
-scheduler still advances sample by sample, so a grain started at offset *j* of a block
-has age −*j* and its window is clamped to silence outside its lifetime: starts and
-ends remain sample-accurate. Per voice it keeps age, length, source table, read
-position, rate and pan, and renders them with audio-rate vector operations, so the
-cost scales with the number of *sounding* grains instead of with every sample.
-Reads use two explicit wrapped indices and linear interpolation (`tablexkt`, size 2, wrap).
-Against the previous per-sample engine, kept as `tests/reference/GrainCoreReference.txt`,
-output is bit-identical at `ksmps=1`; at the host's `ksmps=4` the relative RMS difference
-is below 0.1 % (only the voice-count gain smoother is updated once per block).
-On Csound 7.0.0-beta33 (Node/V8) rendering is about 4–15× faster: default Osc settings use about
-6 % of real time instead of about 33 %, an idle module about 3 % instead of 23 %. Hann/triangle windows have zero endpoints. Summed
+The core runs with local `setksmps 1`. It maintains age, length, source table,
+read position, rate and pan per voice. Reads use two explicit wrapped indices
+and linear interpolation. Hann/triangle windows have zero endpoints. Summed
 voices receive smoothed `1/sqrt(active voices)` compensation and `tanh` peak
 control. Wrappers interpolate Mix/Level and bound their final outputs to ±1.
 
@@ -160,7 +148,7 @@ accepts quoted status keys and retains library metadata/license documentation.
 - Live duration is conservatively reduced so the complete grain read trajectory
   and subsequent writer trajectory fit recorded history, including unfreezing
   during a grain. Initially empty or frozen rings output silence.
-- Pool saturation caps overlap; requested density × size above 64 does not create
+- Pool saturation caps overlap; requested density × size above 32 does not create
   unbounded voices. In the headless smoke run, a saturated instance rendered 1 s
   in about 1.33 s, so **high overlap can exceed real-time CPU capacity** on the
   test machine. Default settings were about 0.3 s per rendered second. These
@@ -172,19 +160,21 @@ accepts quoted status keys and retains library metadata/license documentation.
 
 ## Tools and verification
 
-Dependencies are declared in package.json. Do not commit node_modules or generated test output. Run commands from the repository root using a supported Node.js runtime.
-
-Browser-based checks use Playwright Core and require a compatible Chrome or Chromium installation. Set CHROME_PATH when the browser is not discoverable.
-
-The project launcher invokes Vite directly; use its build mode to build the host.
+All newly installed dependencies and npm cache are on **D:**:
+`D:\csmodular-tools\node_modules` and `D:\csmodular-tools\npm-cache`.
+Both source directories have ignored `node_modules` junctions pointing there.
+Chrome is an existing installation; no browser binary was installed.
+Use `npm.cmd` in PowerShell where execution policy blocks `npm.ps1`.
+On this machine npm's command-shell children also failed to locate Node; the
+provided `host.mjs` launcher uses the current Node executable directly and
+requires no system PATH change. Normal npm scripts work where Node is on PATH.
 
 ```powershell
-node tests/contracts.mjs
-node tests/install.mjs
-node tests/dsp.mjs
-node tests/dsp-node.mjs   # no browser: runs the same Csound WASM in Node
-node scripts/host.mjs build
-node tests/integration.mjs
+node E:/paper/csmodular-granular/tests/contracts.mjs
+node E:/paper/csmodular-granular/tests/install.mjs
+node E:/paper/csmodular-granular/tests/dsp.mjs
+node E:/paper/csmodular-granular/scripts/host.mjs build
+node E:/paper/csmodular-granular/tests/integration.mjs
 ```
 
 Tests use the exact production `@csound/browser@7.0.0-beta33`, reporting Csound 7
