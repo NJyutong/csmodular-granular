@@ -1,6 +1,7 @@
 {
   "name": "granular",
   "displayName": "Granular",
-  "version": "1.1.0",
+  "version": "1.1.1",
+  "author": "Zhang Shengwei",
   "description": "Original Csound granular synthesis: live ring, sample table and periodic wave sources."
 }

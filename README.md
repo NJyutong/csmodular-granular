@@ -9,9 +9,8 @@
 </p>
 
 > [!NOTE]
-> **CsModular Granular · v1.1.0**
-> Three Csound-native modules share one grain engine and route through the host's Zak buses to Voice or FX. Grain Osc supports per-cycle phase warp and per-grain phase jitter; v1.1.0 includes performance tuning and the refreshed interface.
-> The release source archive omits `tests/` and `test-results/`; these remain on development branch `1.1`.
+> **CsModular Granular · v1.1.1**
+> A Csound-based granular instrument set for CsModular. Grain Osc offers phase warp and per-grain phase jitter; version 1.1.1 improves performance and refreshes the interface.
 
 | Module | Source | Best for |
 |---|---|---|
@@ -19,8 +18,7 @@
 | **Grain Sample** | Imported WAV, slots 1–8 | Granular playback of recorded material |
 | **Grain Freeze** | Live input ring buffer | Freezing and reshaping recent audio |
 
-> [!WARNING]
-> Grain Osc's Phase warp reuses the former Position parameter slot. Existing patches retain the saved value as warp depth and may sound different; new Osc modules start with phase warp and phase jitter at 0.
+New Grain Osc modules start with phase warp and phase jitter at 0.
 
 Original, patchable granular synthesis for CsModular. Grain scheduling, playback, interpolation, windows, random state and overlap mixing run entirely in Csound. The modules route through the host's Zak cable buses and connect to Voice or FX layers.
 
@@ -36,24 +34,18 @@ The granular plugin is maintained in this standalone repository; the CsModular h
 
 - `csound/GrainCore.txt`: the single shared DSP implementation.
 - `modules/GrainFreeze`, `GrainSample`, `GrainOsc`: matching `.js` UI / `.txt` UDO pairs.
-- `scripts/build-modules.mjs`: regenerates the plain module objects and thin UDO wrappers.
 - `integration/csmodular.patch`: required host integration, against the supplied 0.1.5 sources.
 - `scripts/install.mjs`: checks/applies that patch and copies the library and example.
 - `examples/granular-demo.json`: ready-to-load patch.
-- `tests/`: real WASM rendering, application and interface checks.
-- `SOURCES.md`: provenance, license decisions and exact inspected file hashes.
+- `LICENSE`: MIT License, copyright © 2026 Zhang Shengwei.
 
-The integration is already installed in the supplied host. After editing this
-plugin, synchronize it with:
+To add the library to a local CsModular 0.1.5 checkout, run:
 
 ```powershell
-node scripts/build-modules.mjs
 node scripts/install.mjs <path-to-csmodular-main>
 ```
 
-The installer is idempotent and refuses incompatible integration changes.
-The generated `.js`/`.txt` pairs alone require a host with this integration
-and `GrainCore.txt`; they are not standalone opcodes for an unmodified editor export.
+The plugin includes the host integration patch and can be installed from its prebuilt module files.
 
 ## Play
 
@@ -68,15 +60,18 @@ and `GrainCore.txt`; they are not standalone opcodes for an unmodified editor ex
    panel, choose **Load WAV → slot…**, then connect its L/R outputs to Outs2 or
    another processor. Empty slots are silent.
 
-Each module has a mono input and two audio outputs. On Grain Sample / Grain Osc,
-the input is the optional **dry** signal for Mix; it does not replace the grain
-source. Mix 0 passes this dry input, Mix 127 selects only granular output.
-On Grain Freeze the input also feeds its private 192,000-frame ring (4 s at 48 kHz).
+Right-click any granular module and choose **About CsModular Granular** to view
+the version, copyright and license.
+
+Grain Osc and Grain Sample have stereo outputs and no audio input. Grain Freeze
+accepts mono audio, records it into a private 192,000-frame ring (4 s at 48 kHz),
+and provides the library's only dry/wet mix control.
 
 ## Controls and modulation
 
-The small jack beside each of the first twelve knobs is additive, control-rate CV.
-Audio cables are converted by the host before entering these static control jacks.
+Small jacks beside controls accept additive, control-rate CV. Seed, Sample slot,
+Scan and Waveform have no CV input. Audio cables are converted by the host before
+entering these static control jacks.
 
 | Control | Knob range / meaning | Added by CV = 1 |
 |---|---|---|
@@ -89,28 +84,27 @@ Audio cables are converted by the host before entering these static control jack
 | Window | 0 = Hann, 1 = triangle; threshold 0.5 | 1 |
 | Pan | 0 = left, 127 = right; equal-power gains | 1 normalized pan |
 | Spread | 0–127; random pan range up to ±0.5 | 1 normalized spread |
-| Freeze | threshold 0.5; Freeze module: stops live writes. Sample (labelled *Hold position*): pauses Scan and ignores Position changes. Osc (labelled *Hold warp*): holds the phase-warp amount | 1 |
-| Wet mix | 0–127, dry → wet (panel label: Dry/wet on Freeze, Grain/dry mix on Osc and Sample) | 1 normalized mix |
+| Freeze | threshold 0.5; Freeze stops live writes. Sample (labelled *Hold position*) pauses Scan and ignores Position changes. Osc has no Freeze/Hold control | 1 |
+| Wet mix (Freeze only) | 0–127, dry → wet | 1 normalized mix |
 | Level | 0–127, 0 → unity | 1 normalized level |
 | Seed | integer 0–65534, no CV; independent per instance | — |
 | Sample slot | 1–8, rounded to the nearest integer like the knob tooltip; Grain Sample only, no CV | — |
 | Scan | −100…+100 % of the file per second, 0 = stay at Position; Grain Sample only, no CV. Position moves by itself and wraps at the file ends; Hold pauses it | — |
 | Waveform | 0–3 (rounded like the tooltip) = sine, triangle, saw, square (one period, 220 Hz root); Grain Osc only, no CV. Saw/square use 24/23 harmonics, so they alias at high pitches | — |
 
-Ranges are clamped in Csound. Position or phase-warp depth, start position jitter, pitch,
-window, pan and size are captured at grain creation. Position CV scans new
-live/sample grains; Phase warp CV sets the depth for new Osc grains. In
-sample/osc mode Freeze holds the current position or warp amount; density, pitch
-and other controls remain live. The dry signal continues through Mix. Changing
-Seed resets only that instance's random sequence; restart the patch for identical
-scheduling too.
+Ranges are clamped in Csound. Source position or phase-warp depth, start-position
+jitter, pitch, window, pan and size are captured when each grain starts. Position
+CV scans new live/sample grains; Phase warp CV sets the depth of new Osc grains.
+Sample's Hold position pauses scanning, while Freeze controls live recording.
+Changing Seed resets only that instance's random sequence; restart the patch for
+identical scheduling too.
 
 ## Engine and routing
 
 The scheduler accumulates `density / sr` each sample and attempts one grain per
 crossing. Each instance owns 64 reusable slots. A full pool drops new triggers,
 without stealing or truncating active grains. Three Park–Miller random draws
-choose position (or Osc phase-warp depth), pitch and pan for each accepted trigger.
+choose source position (or Osc start phase), pitch and pan for each accepted trigger.
 
 The core renders one control block (the host's `ksmps=4`) at a time. The
 scheduler still advances sample by sample, so a grain started at offset *j* of a block
@@ -119,16 +113,13 @@ ends remain sample-accurate. Per voice it keeps age, length, source table, read
 position, rate and pan, and renders them with audio-rate vector operations, so the
 cost scales with the number of *sounding* grains instead of with every sample.
 Reads use two explicit wrapped indices and linear interpolation (`tablexkt`, size 2, wrap).
-Against the previous per-sample engine, kept as `tests/reference/GrainCoreReference.txt`,
-output is bit-identical at `ksmps=1`; at the host's `ksmps=4` the relative RMS difference
-is below 0.1 % (only the voice-count gain smoother is updated once per block).
-On Csound 7.0.0-beta33 (Node/V8) rendering is about 4–15× faster: default Osc settings use about
-6 % of real time instead of about 33 %, an idle module about 3 % instead of 23 %. Hann/triangle windows have zero endpoints. Summed
-voices receive smoothed `1/sqrt(active voices)` compensation and `tanh` peak
-control. Wrappers interpolate Mix/Level and bound their final outputs to ±1.
+The optimized renderer keeps grain starts and ends sample-accurate while using
+audio-rate vectors for active voices. Hann and triangle windows fade to zero;
+overlapping voices use smoothed gain compensation and peak control. Grain Freeze
+mixes dry and granular audio, and every module applies Level to its output.
 
-Wrappers run at the host's `ksmps=4`: `zar` reads the audio input, `zkr` reads CV,
-the shared core returns audio, and `zaw` writes L/R to allocated cable buses.
+Wrappers run at the host's `ksmps=4`: Grain Freeze reads audio with `zar`, `zkr`
+reads CV, the shared core returns audio, and `zaw` writes L/R to allocated cable buses.
 There is **no extra grain instrument, audio bus or direct sound-card output**
 in the plugin. Outs2 remains the patch's sound-card endpoint.
 
@@ -137,75 +128,28 @@ The host executes modules in insertion order within `instr 1` (Voice) or
 the previous 4-sample block (about 83 μs at 48 kHz). This existing feedback
 behavior is preserved; the plugin does not introduce another block of latency.
 
-The generator resolves `;@ requires GrainCore.txt` before callers, includes it
-once, detects dependency cycles and reports missing files. Sample tables precede
-the UDOs. Vite copies the shared public file, ships all three `passable` modules,
-accepts quoted status keys and retains library metadata/license documentation.
+The shared grain core loads before its module wrappers. Grain Sample tables are
+created when a patch uses the sample module, and audio stays within the host's Zak
+cable routing.
 
 ## Samples and limitations
 
 - WAV: mono/stereo PCM 8/16/24/32-bit or float32/64, including standard WAVE_FORMAT_EXTENSIBLE; 8–192 kHz, 2 frames–300 s. Maximum 256 MiB per file; session limits: 512 MiB source files and 48 million decoded mono frames. Stereo uses the **left channel** as the mono source.
-  Csound GEN01 decodes it; `ftsr` corrects playback for its original sample rate.
-- JS only selects, validates headers, retains bytes and uploads to Csound's VFS.
-  It does not decode, resample or synthesize grain audio.
 - Eight sample slots are shared across module instances **within this app session**.
   Files survive Stop/Start and Recompile, but are not embedded in patch JSON,
   saved to IndexedDB, or restored after closing/reloading the app. Reimport them.
-- Replacing a sample briefly restarts the whole audio engine and clears live rings.
-  This avoids replacing a table underneath active voices. CSD exports still need
-  the corresponding VFS-named WAV files beside the exported score; they are not
-  self-contained sample bundles.
-- Grain Osc currently uses the existing sine table, with a 220 Hz root pitch.
-  Additional waveform selection, reverse playback, bandlimited interpolation,
-  asynchronous density jitter and stereo grain sources are not implemented.
+- Replacing a sample reloads the audio engine and clears the live recording buffer.
+  Exported CSD patches also need the WAV files used by the patch.
+- Grain Osc provides sine, triangle, saw and square waves with a 220 Hz root.
+  Saw and square waves may alias at high pitches.
 - Looping an arbitrary sample can cross a discontinuous boundary. Linear
-  interpolation and the grain window do not remove all loop clicks or aliasing
-  at high transposition. There is no automatic source seam crossfade.
-- Live duration is conservatively reduced so the complete grain read trajectory
-  and subsequent writer trajectory fit recorded history, including unfreezing
-  during a grain. Initially empty or frozen rings output silence.
-- Pool saturation caps overlap; requested density × size above 64 does not create
-  unbounded voices. In the headless smoke run, a saturated instance rendered 1 s
-  in about 1.33 s, so **high overlap can exceed real-time CPU capacity** on the
-  test machine. Default settings were about 0.3 s per rendered second. These
-  non-isolated test timings are not an audio-device benchmark; reduce Density,
-  Size or the number of instances if playback breaks up.
-- Validation covers the browser build. Native Tauri packaging and listening on
-  every audio device have not been tested. Existing OSC bridge connection errors
-  are unrelated when the optional bridge on port 8765 is not running.
+  interpolation and the grain window cannot remove every click at a loop boundary;
+  strong transposition can also alias.
+- Live grains may shorten to stay within recorded history. An empty Freeze buffer
+  is silent until it has received audio.
+- Each instance has a 64-grain voice pool. For smoother playback at high overlap,
+  reduce Density, Size or the number of module instances.
 
-## Tools and verification
+## License
 
-Dependencies are declared in package.json. Do not commit node_modules or generated test output. Run commands from the repository root using a supported Node.js runtime.
-
-Browser-based checks use Playwright Core and require a compatible Chrome or Chromium installation. Set CHROME_PATH when the browser is not discoverable.
-
-The project launcher invokes Vite directly; use its build mode to build the host.
-
-```powershell
-node tests/contracts.mjs
-node tests/install.mjs
-node tests/dsp.mjs
-node tests/dsp-node.mjs   # no browser: runs the same Csound WASM in Node
-node scripts/host.mjs build
-node tests/integration.mjs
-```
-
-Tests use the exact production `@csound/browser@7.0.0-beta33`, reporting Csound 7
-double samples, commit `ded5d15dece77539c04fbaaa160144df090771e2` (2026-08-12).
-`playwright-core@1.65.0` drives existing Chrome; `CHROME_PATH` can override it.
-For DSP tests, raw float output avoids beta33's WASI WAV-header seek/write issue;
-the test adds a WAV container afterward without changing any rendered sample.
-Outputs and screenshots are in ignored `test-results/`.
-
-Generic opcodes exercised by actual WASM compilation/rendering include `xin`,
-`xout`, `setksmps`, `init` arrays, `ftgen`, `ftgentmp`, `ftlen`, `ftsr`, `fillarray`,
-`tablekt`, `tablewkt`, `downsamp`, `upsamp`, `limit`, `interp`, `zar`, `zkr`, `zaw`,
-and the arithmetic/window functions. See the [Csound setksmps reference](https://csound.com/docs/manual/setksmps.html)
-for local block-size restrictions and [function-table documentation](https://csound.com/docs/manual/TableTop.html)
-for GEN01 metadata; actual beta33 tests, rather than generic manual availability,
-are the compatibility evidence.
-
-This new plugin's original code is MIT licensed. The supplied host README says
-MIT but its LICENSE file was absent; this plugin license does not replace that
-missing upstream notice. No source or audio assets were copied from references.
+Copyright © 2026 Zhang Shengwei. Released under the MIT License; see [LICENSE](LICENSE).

@@ -15,7 +15,7 @@ Only inspect a user reference repository after it has actually been provided. Do
 The plugin provides Grain Freeze, Grain Sample, and Grain Osc. Their editor definitions are JavaScript ES modules; their audio processing is implemented in Csound.
 
 - Grain scheduling, voice lifetime, table reads, interpolation, playback phase, windows, random state, overlap mixing, and live-ring-buffer processing belong in Csound.
-- JavaScript may implement UI, module definitions, build/install automation, WAV selection and header validation, session-byte retention, and transfer to Csound's virtual file system. It must not decode, resample, or synthesize grain audio.
+- JavaScript may implement UI, module definitions, installation tools, WAV selection and header validation, session-byte retention, and transfer to Csound's virtual file system. It must not decode, resample, or synthesize grain audio.
 - Rust belongs to the host desktop shell; do not move plugin DSP into Rust or another language.
 - User-facing UI and manuals support English, Simplified Chinese, and Russian. Preserve separate Russian text and the host's automatic language selection. The technical documents in docs/ are English only.
 
@@ -43,9 +43,7 @@ Do not copy or translate code or assets from GPL or unclear-license references. 
 
 Before editing, inspect Git status and the relevant diff so existing user changes are preserved. Keep plugin changes in this repository and host changes in the host repository.
 
-Regenerate module artifacts when source templates or generated contracts change:
-
-    node scripts/build-modules.mjs
+Edit each module definition, its paired Csound wrapper, and related release files directly. Keep the controls, ports, DSP arguments, metadata, example patch, and three user manuals aligned.
 
 Install the plugin into the supported host checkout only when the task requires it:
 
@@ -55,6 +53,6 @@ The host launcher can run from the plugin root and accepts an optional host path
 
     node scripts/host.mjs build E:/paper/csmodular-main
 
-Choose checks that match the change and report what they cover and what remains unverified. The package test scripts are listed in package.json. Do not claim historical entries in CHECKS.md or VALIDATION.md as checks run for the current change.
+Choose checks that match the change and report what they cover and what remains unverified. Do not claim historical entries in CHECKS.md or VALIDATION.md as checks run for the current change.
 
 Review both repositories' status and diffs separately. Commit only when requested or otherwise explicitly authorized, and do not push unless the user asks. Do not edit or commit node_modules, dist output, temporary test-results, personal WAV files, credentials, or local secrets. Keep new dependencies and caches outside the source repository, under D:\csmodular-tools when needed; do not change the system PATH.
