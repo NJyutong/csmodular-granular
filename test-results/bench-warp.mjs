@@ -1,7 +1,0 @@
-import {renderCsd,csdText} from '../tests/lib/csound-node.mjs';import {readFile,writeFile} from 'node:fs/promises';
-const original=await readFile('csound/GrainCore.txt','utf8');
-const candidate=original.replace('kPhaseWarp[] init 64','kWarpScale[] init 64\n    kWarpRadians[] init 64').replace('kPhaseWarp[kSlot] = kHeldPosition','kWarpScale[kSlot] = kHeldPosition * kFrames / 6.283185307179586\n                    kWarpRadians[kSlot] = 6.283185307179586 / kFrames').replace('kPhaseWarp[kVoice] > 0','kWarpScale[kVoice] > 0').replace('kPhaseWarp[kVoice] * kSourceLength[kVoice] * sin(6.283185307179586 * aIndex / kSourceLength[kVoice]) / 6.283185307179586','kWarpScale[kVoice] * sin(kWarpRadians[kVoice] * aIndex)');
-const timings=[[],[]];let maxError=0,baseline;for(const i of [0,1,1,0,0,1,1,0]){
-const orc=['sr=48000','ksmps=4','nchnls=2','0dbfs=1','giSin ftgen 1,0,16384,10,1',[original,candidate][i],'instr 1','aIn=0','aL,aR CMGrainCore aIn,2,giSin,16384,3604480,200,500,1,1,0,12,0,0.5,0.7,0,19','outs aL,aR','endin'].join('\n');
-const r=await renderCsd(csdText(orc,'i1 0 2\ne'));if(!baseline)baseline=r.samples;if(r.samples.length!==192000)throw Error('render length');for(let k=0;k<baseline.length;k++)maxError=Math.max(maxError,Math.abs(r.samples[k]-baseline[k]));timings[i].push(Math.round(r.renderMs));}
-console.log(JSON.stringify({timings,maxError}));await writeFile('test-results/grain-warp-candidate.txt',candidate);
