@@ -1,0 +1,42 @@
+;@ requires GrainCore.txt
+opcode GrainFreeze, 0, kkkkkkkkkkkkkkkkkkkkkkkkkkkk
+    kDensity, kSize, kPosition, kPosJitter, kPitch, kPitchJitter, kWindow, kPan, kSpread, kFreeze, kMix, kLevel, kSeed, kAudioIn, kDensityIn, kSizeIn, kPositionIn, kPosJitterIn, kPitchIn, kPitchJitterIn, kWindowIn, kPanIn, kSpreadIn, kFreezeIn, kMixIn, kLevelIn, kOutL, kOutR xin
+    aDry zar kAudioIn
+    kDensityCV zkr kDensityIn
+    kDensity = kDensity + kDensityCV * 100
+    kSizeCV zkr kSizeIn
+    kSize = kSize + kSizeCV * 250
+    kPositionCV zkr kPositionIn
+    kPosition = kPosition / 127 + kPositionCV * 1
+    kPosJitterCV zkr kPosJitterIn
+    kPosJitter = kPosJitter / 127 + kPosJitterCV * 1
+    kPitchCV zkr kPitchIn
+    kPitch = kPitch + kPitchCV * 12
+    kPitchJitterCV zkr kPitchJitterIn
+    kPitchJitter = kPitchJitter + kPitchJitterCV * 12
+    kWindowCV zkr kWindowIn
+    kWindow = kWindow + kWindowCV * 1
+    kPanCV zkr kPanIn
+    kPan = kPan / 127 + kPanCV * 1
+    kSpreadCV zkr kSpreadIn
+    kSpread = kSpread / 127 + kSpreadCV * 1
+    kFreezeCV zkr kFreezeIn
+    kFreeze = kFreeze + kFreezeCV * 1
+    kMixCV zkr kMixIn
+    kMix = kMix / 127 + kMixCV * 1
+    kLevelCV zkr kLevelIn
+    kLevel = kLevel / 127 + kLevelCV * 1
+    iRing ftgentmp 0, 0, -192000, -2, 0
+    kTable = iRing
+    kFrames = 192000
+    kRate = sr
+    aWetL, aWetR CMGrainCore aDry, 1, kTable, kFrames, kRate, kDensity, kSize, kPosition, kPosJitter, kPitch, kPitchJitter, kWindow, kPan, kSpread, kFreeze, kSeed
+    kMix limit kMix, 0, 1
+    kLevel limit kLevel, 0, 1
+    aMix interp kMix
+    aLevel interp kLevel
+    aOutL limit ((1 - aMix) * aDry + aMix * aWetL) * aLevel, -1, 1
+    aOutR limit ((1 - aMix) * aDry + aMix * aWetR) * aLevel, -1, 1
+    zaw aOutL, kOutL
+    zaw aOutR, kOutR
+endop

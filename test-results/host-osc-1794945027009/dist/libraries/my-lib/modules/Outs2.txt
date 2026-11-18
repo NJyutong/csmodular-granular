@@ -1,0 +1,10 @@
+opcode Outs2, 0, kkk
+kButton1, kIn1, kIn2 xin
+ain1 zar kIn1
+ain2 zar kIn2
+
+; --- module body ---
+; Add your DSP code here
+kVol = gkMVOL
+outs ain1*kButton1*kVol,ain2*kButton1*kVol
+endop

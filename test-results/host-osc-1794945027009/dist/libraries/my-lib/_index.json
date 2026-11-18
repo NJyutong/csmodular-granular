@@ -1,0 +1,20 @@
+{
+  "modules": [
+    "ADSR",
+    "CLK",
+    "FdbkDel",
+    "LEV",
+    "LFO",
+    "MixFour",
+    "MOOG",
+    "Noise",
+    "Outs2",
+    "PAN",
+    "PingPong",
+    "REV",
+    "SW",
+    "ToggleMe",
+    "TouchMe",
+    "VCO"
+  ]
+}
