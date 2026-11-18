@@ -19,7 +19,7 @@ try {
 }
 const target = resolve(host, 'public/libraries/granular');
 await mkdir(target, { recursive: true });
-for (const name of ['modules', '_index.json', '_meta.json', 'README.md', 'README.zh-CN.md', 'README.ru.md', 'SOURCES.md', 'LICENSE']) {
+for (const name of ['modules', '_index.json', '_meta.json', 'README.md', 'README.zh-CN.md', 'README.ru.md', 'LICENSE']) {
     await cp(resolve(root, name), resolve(target, name), { recursive: true });
 }
 await mkdir(resolve(host, 'public/csound/modules'), { recursive: true });
