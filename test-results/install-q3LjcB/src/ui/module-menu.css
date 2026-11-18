@@ -1,0 +1,33 @@
+#module-context-menu {
+  display: none;
+  position: fixed;
+  z-index: 15000;
+  width: min(17rem, calc(100vw - 16px));
+  box-sizing: border-box;
+  padding: 6px;
+  color: #e7efeb;
+  background: #202a29;
+  border: 1px solid #50615c;
+  border-radius: 12px;
+  font: 13px/1.45 system-ui, sans-serif;
+  color-scheme: dark;
+}
+#module-context-menu .module-menu-title {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
+  padding: 9px 9px 12px; border-bottom: 1px solid #47534f;
+  font-size: 15px; font-weight: 650; overflow-wrap: anywhere;
+}
+#module-context-menu .module-category { color: #adc3ba; font-size: 12px; font-weight: 450; }
+#module-context-menu .sample-info { color: #c0ccc6; padding: 10px 9px 5px; overflow-wrap: anywhere; }
+#module-context-menu .module-action, #module-context-menu .module-layers button {
+  box-sizing: border-box; border: 0; border-radius: 6px; color: inherit; background: transparent;
+  cursor: pointer; font: inherit;
+}
+#module-context-menu .module-action { width: 100%; padding: 9px; text-align: start; font-weight: 580; }
+#module-context-menu button.module-action:hover, #module-context-menu .module-layers button:hover { background: #34443f; }
+#module-context-menu button:focus-visible { outline: 2px solid #aae0cb; outline-offset: -2px; }
+#module-context-menu .module-layers { display: flex; gap: 3px; align-items: center; margin: 5px 0; padding: 8px; border-block: 1px solid #47534f; }
+#module-context-menu .module-layers span { flex: 1; color: #becac5; }
+#module-context-menu .module-layers button { padding: 5px 9px; }
+#module-context-menu .module-layers button[aria-pressed=true] { color: #102720; background: #b0dbc7; font-weight: 650; }
+#module-context-menu .destructive { color: #ffb9ab; }

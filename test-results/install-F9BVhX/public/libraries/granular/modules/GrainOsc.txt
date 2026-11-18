@@ -1,0 +1,46 @@
+;@ requires GrainCore.txt
+opcode GrainOsc, 0, kkkkkkkkkkkkkkkkkkkkkkkkkkkkk
+    kDensity, kSize, kPosition, kPosJitter, kPitch, kPitchJitter, kWindow, kPan, kSpread, kFreeze, kMix, kLevel, kSeed, kWave, kAudioIn, kDensityIn, kSizeIn, kPositionIn, kPosJitterIn, kPitchIn, kPitchJitterIn, kWindowIn, kPanIn, kSpreadIn, kFreezeIn, kMixIn, kLevelIn, kOutL, kOutR xin
+    aDry zar kAudioIn
+    kDensityCV zkr kDensityIn
+    kDensity = kDensity + kDensityCV * 100
+    kSizeCV zkr kSizeIn
+    kSize = kSize + kSizeCV * 250
+    kPositionCV zkr kPositionIn
+    kPosition = kPosition / 127 + kPositionCV * 1
+    kPosJitterCV zkr kPosJitterIn
+    kPosJitter = kPosJitter / 127 + kPosJitterCV * 1
+    kPitchCV zkr kPitchIn
+    kPitch = kPitch + kPitchCV * 12
+    kPitchJitterCV zkr kPitchJitterIn
+    kPitchJitter = kPitchJitter + kPitchJitterCV * 12
+    kWindowCV zkr kWindowIn
+    kWindow = kWindow + kWindowCV * 1
+    kPanCV zkr kPanIn
+    kPan = kPan / 127 + kPanCV * 1
+    kSpreadCV zkr kSpreadIn
+    kSpread = kSpread / 127 + kSpreadCV * 1
+    kFreezeCV zkr kFreezeIn
+    kFreeze = kFreeze + kFreezeCV * 1
+    kMixCV zkr kMixIn
+    kMix = kMix / 127 + kMixCV * 1
+    kLevelCV zkr kLevelIn
+    kLevel = kLevel / 127 + kLevelCV * 1
+    iFrames = ftlen(giSin)
+    iTriangle ftgentmp 0, 0, iFrames, 10, 1.000000000, 0.000000000, -0.111111111, 0.000000000, 0.040000000, 0.000000000, -0.020408163, 0.000000000, 0.012345679, 0.000000000, -0.008264463, 0.000000000, 0.005917160, 0.000000000, -0.004444444
+    iSaw ftgentmp 0, 0, iFrames, 10, 1.000000000, 0.500000000, 0.333333333, 0.250000000, 0.200000000, 0.166666667, 0.142857143, 0.125000000, 0.111111111, 0.100000000, 0.090909091, 0.083333333, 0.076923077, 0.071428571, 0.066666667, 0.062500000, 0.058823529, 0.055555556, 0.052631579, 0.050000000, 0.047619048, 0.045454545, 0.043478261, 0.041666667
+    iSquare ftgentmp 0, 0, iFrames, 10, 1.000000000, 0.000000000, 0.333333333, 0.000000000, 0.200000000, 0.000000000, 0.142857143, 0.000000000, 0.111111111, 0.000000000, 0.090909091, 0.000000000, 0.076923077, 0.000000000, 0.066666667, 0.000000000, 0.058823529, 0.000000000, 0.052631579, 0.000000000, 0.047619048, 0.000000000, 0.043478261
+    kWave = int(limit(kWave, 0, 3) + 0.5)
+    kTable = (kWave == 0 ? giSin : (kWave == 1 ? iTriangle : (kWave == 2 ? iSaw : iSquare)))
+    kFrames = iFrames
+    kRate = 220 * kFrames
+    aWetL, aWetR CMGrainCore aDry, 2, kTable, kFrames, kRate, kDensity, kSize, kPosition, kPosJitter, kPitch, kPitchJitter, kWindow, kPan, kSpread, kFreeze, kSeed
+    kMix limit kMix, 0, 1
+    kLevel limit kLevel, 0, 1
+    aMix interp kMix
+    aLevel interp kLevel
+    aOutL limit ((1 - aMix) * aDry + aMix * aWetL) * aLevel, -1, 1
+    aOutR limit ((1 - aMix) * aDry + aMix * aWetR) * aLevel, -1, 1
+    zaw aOutL, kOutL
+    zaw aOutR, kOutR
+endop
