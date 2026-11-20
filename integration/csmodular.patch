@@ -1022,7 +1022,7 @@ index bc348fe..a4cd90f 100644
 +    addLink({ en: 'Project website', zh: '项目网址', ru: 'Сайт проекта' }, url, url);
 +    addLink({ en: 'License', zh: '许可证', ru: 'Лицензия' }, 'MIT', url + '/blob/HEAD/LICENSE');
 +    const copyright = document.createElement('small');
-+    copyright.textContent = '© 2026 CsModular granular library contributors\n© 2026 Zhang Shengwei';
++    copyright.textContent = '© 2026 Zhang Shengwei';
 +    const close = document.createElement('button');
 +    close.type = 'button';
 +    close.autofocus = true;
