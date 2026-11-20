@@ -1,0 +1,215 @@
+; REFERENCE IMPLEMENTATION (per-sample, setksmps 1) - kept only for regression tests.
+; This is the per-sample rendering reference. Its table reader and bandlimit tiers
+; intentionally match the production engine; scheduling and voice lifetimes remain
+; sample-by-sample so the block renderer can be compared against it.
+; Do not include this file in a module library.
+; Original CsModular granular engine. No granular synthesis opcodes.
+; A private 64-voice pool runs at one sample per local control cycle.
+; mode: 0 = sample, 1 = live ring, 2 = periodic waveform (220 Hz root).
+opcode CMGrainCore, aa, aikkkkkkkkkkkkkkk
+    setksmps 1
+    aInput, iMode, kTable, kFrames, kSourceRate, kDensity, kSizeMs, kPosition, kPosJitter, kPitch, kPitchJitter, kWindow, kPan, kSpread, kFreeze, kSeed, kTimeJitter xin
+    kAge[] init 64
+    kLength[] init 64
+    kRead[] init 64
+    kSeamWidth[] init 64
+    kSeamValue[] init 64
+    kStep[] init 64
+    kSource[] init 64
+    kSourceLength[] init 64
+    kShape[] init 64
+    kLeft[] init 64
+    kRight[] init 64
+    kNextTrigger init -1
+    kPreviousTimeOffset init 0
+    kCarrier init 0
+    kWrite init 0
+    kFilled init 0
+    kRandom init 1
+    kTimeRandom init 1
+    kLastSeed init -1
+    kHeldPosition init 0
+    kLastFreeze init -1
+    kActive init 0
+    kSmoothedActive init 1
+
+    kFrames = max(2, int(kFrames))
+    kDensity limit kDensity, 0, 200
+    kSizeMs limit kSizeMs, 2, 500
+    kPosition limit kPosition, 0, 1
+    kPosJitter limit kPosJitter, 0, 1
+    kPitch limit kPitch, -48, 48
+    kPitchJitter limit kPitchJitter, 0, 24
+    kPan limit kPan, 0, 1
+    kSpread limit kSpread, 0, 1
+    kTimeJitter limit kTimeJitter, 0, 1
+    kSeedValue = 1 + int(limit(kSeed, 0, 65534))
+    if kSeedValue != kLastSeed then
+        kRandom = kSeedValue
+        kTimeRandom = (kSeedValue * 48271 + 12820163) % 2147483647
+        if kTimeRandom == 0 then
+            kTimeRandom = 1
+        endif
+        kLastSeed = kSeedValue
+    endif
+    if kFreeze < 0.5 || kLastFreeze < 0 then
+        kHeldPosition = kPosition
+    endif
+    kLastFreeze = kFreeze
+
+    ; Only the live source writes; freezing never suspends existing voices.
+    if iMode == 1 && kFreeze < 0.5 then
+        kInput downsamp aInput
+        tablewkt kInput, kWrite, kTable
+        kWrite = (kWrite + 1) % kFrames
+        kFilled = min(kFilled + 1, kFrames)
+    endif
+
+    ; Sample-countdown scheduler with independent, seeded timing offsets.
+    if iMode == 2 then
+        kCarrierStep = pow(2, kPitch / 12) * kSourceRate / sr
+    endif
+    kDidTrigger = 0
+    if kDensity <= 0 then
+        kNextTrigger = -1
+        kPreviousTimeOffset = 0
+    else
+        if kNextTrigger < 0 then
+            kNextTrigger = sr / kDensity
+        endif
+        kNextTrigger = kNextTrigger - 1
+        if kNextTrigger <= 0 then
+            kDidTrigger = 1
+        endif
+    endif
+    if kDidTrigger == 1 then
+        kSlot = 0
+        while kSlot < 64 do
+            if kLength[kSlot] == 0 then
+                ; Park-Miller state belongs to this UDO instance, not Csound globally.
+                kRandom = (kRandom * 16807) % 2147483647
+                kPositionRandom = 2 * kRandom / 2147483647 - 1
+                kRandom = (kRandom * 16807) % 2147483647
+                kPitchRandom = 2 * kRandom / 2147483647 - 1
+                kRandom = (kRandom * 16807) % 2147483647
+                kPanRandom = 2 * kRandom / 2147483647 - 1
+                kRatio = pow(2, limit(kPitch + kPitchRandom * kPitchJitter, -48, 48) / 12)
+                kRate = kRatio * kSourceRate / sr
+                kDuration = max(2, int(kSizeMs * sr / 1000))
+                kStart = limit(kHeldPosition + kPositionRandom * kPosJitter, 0, 1)
+                if iMode == 1 then
+                    ; Reserve the whole read trajectory AND future writer trajectory.
+                    ; This remains safe if Freeze is released during a grain.
+                    kDuration = min(kDuration, int((kFilled - 4) / (kRate + 1)))
+                    kNear = kDuration * kRate + 2
+                    kFar = kFilled - kDuration - 2
+                    kStart = kWrite - (kNear + kStart * max(0, kFar - kNear))
+                elseif iMode == 2 then
+                    kStart = kCarrier + 0.5 * kFrames * kPositionRandom * kPosJitter
+                else
+                    kStart = kStart * (kFrames - 1)
+                endif
+                if kDuration >= 2 then
+                    kVoicePan = limit(kPan + 0.5 * kSpread * kPanRandom, 0, 1)
+                    kAge[kSlot] = 0
+                    kLength[kSlot] = kDuration
+                    kRead[kSlot] = kStart - floor(kStart / kFrames) * kFrames
+                    kStep[kSlot] = kRate
+                    kSource[kSlot] = kTable
+                    kSourceLength[kSlot] = kFrames
+                    kSeamWidth[kSlot] = 0
+                    if iMode == 0 && kFrames >= 16 && kStart + kRate * (kDuration - 1) > kFrames - 1 then
+                        kHead tablekt 0, kTable
+                        kTail tablekt kFrames - 1, kTable
+                        if abs(kHead - kTail) > 0.001 then
+                            ; Smooth approximately 2 ms on each side, with a bound for short files.
+                            kSeamWidth[kSlot] = min(kFrames * 0.125, max(2, 0.002 * sr * kRate))
+                            kSeamValue[kSlot] = (kHead + kTail) * 0.5
+                        endif
+                    endif
+                    kShape[kSlot] = (kWindow >= 0.5 ? 1 : 0)
+                    kLeft[kSlot] = sqrt(1 - kVoicePan)
+                    kRight[kSlot] = sqrt(kVoicePan)
+                    kActive = kActive + 1
+                endif
+                kgoto scheduled
+            endif
+            kSlot = kSlot + 1
+        od
+    endif
+scheduled:
+    if kDidTrigger == 1 then
+        if kTimeJitter > 0 then
+            kTimeRandom = (kTimeRandom * 48271) % 2147483647
+            kTimeOffset = (2 * kTimeRandom / 2147483647 - 1) * kTimeJitter * 0.45 * sr / kDensity
+        else
+            kTimeOffset = 0
+        endif
+        kNextTrigger = max(0, kNextTrigger + sr / kDensity + kTimeOffset - kPreviousTimeOffset)
+        kPreviousTimeOffset = kTimeOffset
+    endif
+    if iMode == 2 then
+        kCarrier = kCarrier + kCarrierStep
+        kCarrier = kCarrier - floor(kCarrier / kFrames) * kFrames
+    endif
+    kSumL = 0
+    kSumR = 0
+    kVoice = 0
+    while kVoice < 64 do
+        if kLength[kVoice] > 0 then
+            kPhase = kAge[kVoice] / (kLength[kVoice] - 1)
+            if kShape[kVoice] == 0 then
+                kEnvelope = 0.5 - 0.5 * cos(6.283185307179586 * kPhase)
+            else
+                kEnvelope = 1 - abs(2 * kPhase - 1)
+            endif
+            ; Use the production reader at a single audio sample per local cycle.
+            aIndex = kRead[kVoice]
+            if iMode == 2 then
+                aRead tablexkt aIndex, kSource[kVoice], 0, 4, 0, 0, 1
+            elseif kSourceLength[kVoice] < 16 then
+                aRead tablexkt aIndex, kSource[kVoice], 0, 2, 0, 0, 1
+            elseif kStep[kVoice] <= 1 then
+                aRead tablexkt aIndex, kSource[kVoice], 0, 4, 0, 0, 1
+            elseif kStep[kVoice] <= 2 then
+                aRead tablexkt aIndex, kSource[kVoice], kStep[kVoice], 16, 0, 0, 1
+            elseif kStep[kVoice] <= 4 then
+                aRead tablexkt aIndex, kSource[kVoice], kStep[kVoice], 32, 0, 0, 1
+            elseif kStep[kVoice] <= 8 then
+                aRead tablexkt aIndex, kSource[kVoice], kStep[kVoice], 64, 0, 0, 1
+            elseif kStep[kVoice] <= 16 then
+                aRead tablexkt aIndex, kSource[kVoice], kStep[kVoice], 128, 0, 0, 1
+            elseif kStep[kVoice] <= 64 then
+                aRead tablexkt aIndex, kSource[kVoice], kStep[kVoice], 512, 0, 0, 1
+            else
+                aRead tablexkt aIndex, kSource[kVoice], kStep[kVoice], 1024, 0, 0, 1
+            endif
+            kSample downsamp aRead
+            if iMode == 0 && kSeamWidth[kVoice] > 0 then
+                kDistance = min(kRead[kVoice], kSourceLength[kVoice] - kRead[kVoice])
+                kBlend limit 1 - kDistance / kSeamWidth[kVoice], 0, 1
+                kBlend = kBlend * kBlend * (3 - 2 * kBlend)
+                kSample = kSample + (kSeamValue[kVoice] - kSample) * kBlend
+            endif
+            kValue = kSample * kEnvelope
+            kSumL = kSumL + kValue * kLeft[kVoice]
+            kSumR = kSumR + kValue * kRight[kVoice]
+            kNewRead = kRead[kVoice] + kStep[kVoice]
+            kRead[kVoice] = kNewRead - floor(kNewRead / kSourceLength[kVoice]) * kSourceLength[kVoice]
+            kAge[kVoice] = kAge[kVoice] + 1
+            if kAge[kVoice] >= kLength[kVoice] then
+                kLength[kVoice] = 0
+                kActive = kActive - 1
+            endif
+        endif
+        kVoice = kVoice + 1
+    od
+    ; Smooth actual voice count over 10 ms; the module wrappers own the output ceiling.
+    kSmoothedActive = kSmoothedActive + (max(1, kActive) - kSmoothedActive) * (1 - exp(-1 / (0.01 * sr)))
+    kGain = 1 / sqrt(max(1, kSmoothedActive))
+    kWetL = kSumL * kGain
+    kWetR = kSumR * kGain
+    aLeft upsamp kWetL
+    aRight upsamp kWetR
+    xout aLeft, aRight
+endop

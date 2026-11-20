@@ -1,0 +1,188 @@
+{
+  "filename": "host-workflow.json",
+  "modules": [
+    {
+      "name": "LFO",
+      "library": "my-lib",
+      "id": 1,
+      "type": "LFO",
+      "parameters": "[0,0,64,0,0,0]",
+      "modes": [],
+      "area": "VOICE",
+      "hpos": 0,
+      "vpos": 0,
+      "customColor": null,
+      "midiMappings": []
+    },
+    {
+      "name": "GrainOsc",
+      "library": "pulvis",
+      "id": 2,
+      "type": "GrainOsc",
+      "parameters": "[0,24,80,0,0,0,0,2,64,64,0,0,-12,1,0,75,1]",
+      "modes": [],
+      "area": "VOICE",
+      "hpos": 6,
+      "vpos": 3,
+      "customColor": null,
+      "midiMappings": []
+    },
+    {
+      "name": "GrainFreeze",
+      "library": "pulvis",
+      "id": 3,
+      "type": "GrainFreeze",
+      "parameters": "[0,12,80,32,8,0,0,0,64,64,0,127,-3,1,0,0,1,0.95,0]",
+      "modes": [],
+      "area": "VOICE",
+      "hpos": 19,
+      "vpos": -1,
+      "customColor": null,
+      "midiMappings": []
+    },
+    {
+      "name": "GrainSample",
+      "library": "pulvis",
+      "id": 4,
+      "type": "GrainSample",
+      "parameters": "[0,12,80,32,8,0,0,0,64,64,0,0,-12,1,2,0,0,0]",
+      "modes": [],
+      "area": "VOICE",
+      "hpos": 32,
+      "vpos": -5,
+      "customColor": null,
+      "midiMappings": []
+    },
+    {
+      "name": "Outs2",
+      "library": "my-lib",
+      "id": 5,
+      "type": "Outs2",
+      "parameters": "[0,0,0,0]",
+      "modes": [],
+      "area": "VOICE",
+      "hpos": 29,
+      "vpos": -7,
+      "customColor": null,
+      "midiMappings": []
+    }
+  ],
+  "cables": [
+    {
+      "from": {
+        "module": "LFO",
+        "id": 1,
+        "jack": 0,
+        "pin": "out"
+      },
+      "to": {
+        "module": "GrainOsc",
+        "id": 2,
+        "jack": 2,
+        "pin": "in"
+      },
+      "color": "#3b82f6",
+      "customColor": null,
+      "type": "out-in",
+      "area": "VOICE"
+    },
+    {
+      "from": {
+        "module": "LFO",
+        "id": 1,
+        "jack": 0,
+        "pin": "out"
+      },
+      "to": {
+        "module": "GrainOsc",
+        "id": 2,
+        "jack": 11,
+        "pin": "in"
+      },
+      "color": "#3b82f6",
+      "customColor": null,
+      "type": "out-in",
+      "area": "VOICE"
+    },
+    {
+      "from": {
+        "module": "GrainOsc",
+        "id": 2,
+        "jack": 0,
+        "pin": "out"
+      },
+      "to": {
+        "module": "GrainFreeze",
+        "id": 3,
+        "jack": 0,
+        "pin": "in"
+      },
+      "color": "#ef4444",
+      "customColor": null,
+      "type": "out-in",
+      "area": "VOICE"
+    },
+    {
+      "from": {
+        "module": "GrainFreeze",
+        "id": 3,
+        "jack": 0,
+        "pin": "out"
+      },
+      "to": {
+        "module": "Outs2",
+        "id": 5,
+        "jack": 0,
+        "pin": "in"
+      },
+      "color": "#ef4444",
+      "customColor": null,
+      "type": "out-in",
+      "area": "VOICE"
+    },
+    {
+      "from": {
+        "module": "GrainFreeze",
+        "id": 3,
+        "jack": 1,
+        "pin": "out"
+      },
+      "to": {
+        "module": "Outs2",
+        "id": 5,
+        "jack": 1,
+        "pin": "in"
+      },
+      "color": "#ef4444",
+      "customColor": null,
+      "type": "out-in",
+      "area": "VOICE"
+    }
+  ],
+  "stickers": [],
+  "design": {
+    "lcd": {
+      "color": "#4ec9c9",
+      "glow": 0.2,
+      "panelOpacity": 0.15,
+      "lineWeight": 0.2
+    },
+    "cables": {
+      "audioWidth": 3,
+      "controlWidth": 1.5,
+      "glow": false
+    },
+    "background": {
+      "image": null,
+      "parallax": true,
+      "parallaxStrength": 20
+    },
+    "grid": {
+      "multX": 1,
+      "multY": 1,
+      "snap": true,
+      "size": 4
+    }
+  },
+  "textpad": ""
+}
