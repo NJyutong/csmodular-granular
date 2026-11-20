@@ -13,6 +13,8 @@
 
 版本 0.0.5 · 下载：[Windows x64 安装器](https://github.com/NJyutong/csmodular-pulvis/releases/download/v0.0.5/Pulvis-0.0.5-windows-x64.exe) · [Linux x64 Debian 包](https://github.com/NJyutong/csmodular-pulvis/releases/download/v0.0.5/Pulvis-0.0.5-linux-x64.deb) · [源码包](https://github.com/NJyutong/csmodular-pulvis/releases/download/v0.0.5/Pulvis-0.0.5-source.zip) · [SHA-256](https://github.com/NJyutong/csmodular-pulvis/releases/download/v0.0.5/SHA256SUMS.txt)
 
+<p align="center"><img src="assets/pulvis-social-preview.png" width="720" alt="微粒颗粒合成插件库预览图"></p>
+
 三个模块均采用宽屏（`500 × 300`）哑光阳极石墨色双区硬件面板（`PulvisPanel.js`），顶部带有实时显示区（播放时同步显示第一个已连接音频输出的 Csound 实时波形与 2048 点汉宁窗 FFT 频谱，以及当前颗粒包络形状），配合宿主高 DPI 画布渲染保持界面与连线清晰对齐：
 
 - **微粒 · 颗粒冻结**（左 3 × 3 + 右 3 × 3）：左区为 **实时环形缓冲与颗粒核**（`冻结`、`回看位置`、`回看抖动`、`颗粒/秒`、`粒长 ms`、`颗粒包络`、`播放来源`、`反馈`、`捕捉快照`），右区为 **音高散布、干湿混音与时序**（`音高（半音）`、`音高抖动 st`、`随机种子`、`干湿比`、`声像扩展`、`输出电平 dB`、`声像`、`时间散布 %`、`播放方向`）。
