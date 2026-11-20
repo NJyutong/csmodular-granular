@@ -1,0 +1,138 @@
+diff --git a/src/csound/CsoundEngine.js b/src/csound/CsoundEngine.js
+--- a/src/csound/CsoundEngine.js
++++ b/src/csound/CsoundEngine.js
+@@ -18,6 +18,7 @@
+         this.lastRecompileAt = null;
+         this.isRecompiling = false;
+         this.grainSamples = new GrainSamples();
++        this._audioOperations = Promise.resolve();
+         this._loadingGrainSample = false;
+         // Подписчики на события
+         this._stateListeners = [];
+@@ -80,7 +81,17 @@
+     // ЖИЗНЕННЫЙ ЦИКЛ
+     // ============================================
+ 
+-    async init() {
++    _scheduleAudio(operation) {
++        const result = this._audioOperations.then(operation);
++        this._audioOperations = result.catch(() => {});
++        return result;
++    }
++
++    init() { return this._scheduleAudio(() => this._init()); }
++    stop() { return this._scheduleAudio(() => this._stop()); }
++    recompile() { return this._scheduleAudio(() => this._recompile()); }
++
++    async _init() {
+         if (this.state === 'initializing') {
+             console.warn('[CsoundEngine] Already initializing');
+             return false;
+@@ -166,14 +177,22 @@
+             throw new Error(localize({en:'Wait for the current audio operation to finish.',zh:'请等待当前音频操作完成。',ru:'Дождитесь завершения текущей операции со звуком.'}));
+         }
+         this._loadingGrainSample = true;
++        try {
++            return await this._scheduleAudio(() => this._replaceGrainSample(slot, file));
++        } finally {
++            this._loadingGrainSample = false;
++        }
++    }
++
++    async _replaceGrainSample(slot, file) {
+         const previous = this.grainSamples.slots.get(slot);
+         const wasRunning = this.state === 'running';
+         try {
+             const entry = await this.grainSamples.load(slot, file);
+             // Restart rebuilds tables atomically; no voice reads a replaced table.
+             if (wasRunning) {
+-                await this.stop();
+-                if (!await this.init()) throw new Error(localize({
++                await this._stop();
++                if (!await this._init()) throw new Error(localize({
+                     en: 'Csound could not load this WAV. Check that its audio encoding is supported.',
+                     zh: 'Csound 无法读取该 WAV，请检查音频编码是否受支持。',
+                     ru: 'Csound не смог прочитать WAV. Проверьте, поддерживается ли формат аудиоданных.',
+@@ -183,14 +202,18 @@
+         } catch (error) {
+             if (previous) this.grainSamples.slots.set(slot, previous);
+             else this.grainSamples.slots.delete(slot);
+-            if (wasRunning && this.state !== 'running') await this.init();
++            if (wasRunning && this.state !== 'running' && !await this._init()) {
++                throw new Error(localize({
++                    en: 'WAV import failed. The previous slot was restored, but audio could not restart.',
++                    zh: 'WAV 导入失败。已恢复原采样槽，音频引擎重启失败。',
++                    ru: 'Ошибка импорта WAV. Слот восстановлен, но перезапуск звука не удался.',
++                }), { cause: error });
++            }
+             throw error;
+-        } finally {
+-            this._loadingGrainSample = false;
+-        }
+-    }
+-
+-    async stop() {
++        }
++    }
++
++    async _stop() {
+         if (this.state === 'idle') {
+             //console.log('[CsoundEngine] Already stopped');
+             return;
+@@ -222,9 +245,9 @@
+     // ГОРЯЧАЯ ЗАМЕНА ORC
+     // ============================================
+ 
+-    async recompile() {
++    async _recompile() {
+         if (this.state !== 'running' || !this.instance) {
+-            return this.init();
++            return this._init();
+         }
+ 
+         console.log('[CsoundEngine] Recompiling via reset + compileOrc...');
+@@ -279,8 +302,8 @@
+         } catch (e) {
+             console.error('[CsoundEngine] recompile via reset failed:', e);
+             console.log('[CsoundEngine] Falling back to full restart...');
+-            await this.stop();
+-            return this.init();
++            await this._stop();
++            return this._init();
+         } finally {
+             this.isRecompiling = false;
+         }
+diff --git a/src/csound/GrainSamples.js b/src/csound/GrainSamples.js
+--- a/src/csound/GrainSamples.js
++++ b/src/csound/GrainSamples.js
+@@ -15,7 +15,7 @@
+ 
+     async load(slot, file) {
+         if (!Number.isInteger(slot) || slot < 1 || slot > 8) throw new Error(localize({"en":"Sample slot must be 1 to 8.","zh":"采样槽必须是 1 到 8。","ru":"Номер слота должен быть от 1 до 8."}));
+-        if (!file || !Number.isFinite(file.size) || file.size < 44) throw new Error(localize({"en":"Choose a valid WAV file.","zh":"请选择有效的 WAV 文件。","ru":"Выберите корректный файл WAV."}));
++        if (!file || typeof file.arrayBuffer !== 'function' || !Number.isFinite(file.size) || file.size < 44) throw new Error(localize({"en":"Choose a valid WAV file.","zh":"请选择有效的 WAV 文件。","ru":"Выберите корректный файл WAV."}));
+         if (file.size > GrainSamples.MAX_FILE_BYTES) throw new Error(localize({"en":"Each WAV file must be no larger than 256 MiB.","zh":"单个 WAV 文件不能超过 256 MiB。","ru":"Размер одного WAV не должен превышать 256 МиБ."}));
+         const previous = this.slots.get(slot);
+         const sessionBytes = [...this.slots.values()].reduce((sum, entry) => sum + entry.bytes.length, 0)
+@@ -26,15 +26,18 @@
+         const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+         const tag = offset => String.fromCharCode(...bytes.subarray(offset, offset + 4));
+         if (tag(0) !== 'RIFF' || tag(8) !== 'WAVE') throw new Error(localize({"en":"Expected RIFF/WAVE. RF64 and big-endian WAV are not supported.","zh":"文件不是标准 RIFF/WAVE 格式；暂不支持 RF64 和大端 WAV。","ru":"Требуется RIFF/WAVE. RF64 и WAV с обратным порядком байтов не поддерживаются."}));
++        const riffEnd = 8 + view.getUint32(4, true);
+         let format, frames = 0;
+-        for (let offset = 12; offset + 8 <= bytes.length;) {
++        for (let offset = 12; offset + 8 <= riffEnd && offset + 8 <= bytes.length;) {
+             const size = view.getUint32(offset + 4, true), start = offset + 8;
+-            if (start + size > bytes.length) throw new Error(localize({"en":"WAV data is incomplete; the file may be damaged.","zh":"WAV 文件数据不完整，文件可能已损坏。","ru":"Данные WAV неполны; возможно, файл повреждён."}));
++            if (riffEnd > bytes.length || start + size > riffEnd) throw new Error(localize({"en":"WAV data is incomplete; the file may be damaged.","zh":"WAV 文件数据不完整，文件可能已损坏。","ru":"Данные WAV неполны; возможно, файл повреждён."}));
+             if (tag(offset) === 'fmt ' && size >= 16) {
+                 let code = view.getUint16(start, true);
+                 if (code === 0xfffe && size >= 40) {
+                     const tail = [0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71];
+-                    const standardGuid = view.getUint16(start + 28, true) === 0
++                    const extensionSize = view.getUint16(start + 16, true);
++                    const standardGuid = extensionSize >= 22 && extensionSize <= size - 18
++                        && view.getUint16(start + 28, true) === 0
+                         && view.getUint16(start + 30, true) === 0x0010
+                         && tail.every((v, i) => bytes[start + 32 + i] === v);
+                     if (!standardGuid) throw new Error(localize({"en":"This WAV uses an unsupported extended audio encoding.","zh":"该 WAV 使用了不支持的扩展音频编码。","ru":"Этот WAV использует неподдерживаемый расширенный формат аудио."}));

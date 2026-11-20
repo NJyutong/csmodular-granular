@@ -1,111 +1,91 @@
-# CsModular 颗粒合成库
-
-[English](README.md) · **简体中文** · [Русский](README.ru.md)
-
-<p align="center">
-  <a href="https://github.com/gleb812/csmodular"><img src="https://img.shields.io/badge/Host-CsModular-2563EB?style=flat-square&logo=github&logoColor=white" alt="宿主系统：CsModular"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-059669?style=flat-square" alt="MIT 许可证 — Zhang Shengwei"></a>
-  <a href="csound/GrainCore.txt"><img src="https://img.shields.io/badge/DSP-Csound_Granular-7C3AED?style=flat-square" alt="Csound 颗粒 DSP"></a>
-</p>
-
-> [!NOTE]
-> **CsModular 颗粒合成库 · v1.1.1**
-> 基于 Csound 的 CsModular 颗粒合成插件，包含 Grain Freeze、Grain Sample 和 Grain Osc。Grain Osc 支持相位扭曲与逐颗粒起始相位抖动；1.1.1 优化运行效率并更新界面。
-
-| 模块 | 声源 | 适用场景 |
-|---|---|---|
-| **Grain Osc** | 内置波表 | 相位扭曲、逐颗粒相位抖动和颗粒音色设计 |
-| **Grain Sample** | 导入的 WAV，1–8 号槽 | 对录音素材进行颗粒播放 |
-| **Grain Freeze** | 实时输入环形缓冲 | 冻结并重塑近期声音 |
-
-新建 Grain Osc 的相位扭曲与相位抖动默认值均为 0。
-
-为 CsModular 提供原创、可连接的颗粒合成。颗粒调度、播放、插值、窗函数、随机状态和重叠混音全部由 Csound 实现。模块通过宿主 Zak 电缆总线连接到 Voice 或 FX 层。
+# 微粒——CsModular 颗粒合成插件库
 
 
-## 语言
+[English](README.md) · [简体中文](README.zh-CN.md) · [Русский](README.ru.md)
 
-界面按浏览器/系统语言偏好显示简体中文、俄语或英语；未知语言回退到英语。更改系统语言后刷新页面。
+<p align="center"><img src="assets/pulvis-icon.png" width="144" alt="微粒应用图标"></p>
 
-## 目录与安装
+**微粒是为 CsModular 提供颗粒合成的插件模块库。**
 
-[CsModular 宿主系统](https://github.com/gleb812/csmodular)与颗粒插件分别维护。
+- **微粒 · 颗粒冻结** 录入并冻结实时音频，可延展人声或和弦。
+- **微粒 · 颗粒采样** 从 WAV 扫描素材，并切碎或移调。
+- **微粒 · 颗粒振荡器** 用内置波形生成可演奏的颗粒音色。
 
-- csound/GrainCore.txt：唯一共享的 DSP 实现。
-- modules/GrainFreeze、GrainSample、GrainOsc：配对的 .js UI 与 .txt UDO。
-- integration/csmodular.patch：针对随附 0.1.5 源码的宿主集成补丁。
-- scripts/install.mjs：检查/应用补丁，并复制库与示例。
-- examples/granular-demo.json：可直接载入的补丁。
-- LICENSE：MIT 许可证，版权 © 2026 Zhang Shengwei。
+版本 0.0.5 · 下载：[Windows x64 安装器](https://github.com/NJyutong/csmodular-pulvis/releases/download/v0.0.5/Pulvis-0.0.5-windows-x64.exe) · [Linux x64 Debian 包](https://github.com/NJyutong/csmodular-pulvis/releases/download/v0.0.5/Pulvis-0.0.5-linux-x64.deb) · [源码包](https://github.com/NJyutong/csmodular-pulvis/releases/download/v0.0.5/Pulvis-0.0.5-source.zip) · [SHA-256](https://github.com/NJyutong/csmodular-pulvis/releases/download/v0.0.5/SHA256SUMS.txt)
 
-要将插件添加到本地 CsModular 0.1.5 源码，运行：
+三个模块均采用宽屏（`500 × 300`）哑光阳极石墨色双区硬件面板（`PulvisPanel.js`），顶部带有实时显示区（播放时同步显示第一个已连接音频输出的 Csound 实时波形与 2048 点汉宁窗 FFT 频谱，以及当前颗粒包络形状），配合宿主高 DPI 画布渲染保持界面与连线清晰对齐：
 
-    node scripts/install.mjs <path-to-csmodular-main>
+- **微粒 · 颗粒冻结**（左 3 × 3 + 右 3 × 3）：左区为 **实时环形缓冲与颗粒核**（`冻结`、`回看位置`、`回看抖动`、`颗粒/秒`、`粒长 ms`、`颗粒包络`、`播放来源`、`反馈`、`捕捉快照`），右区为 **音高散布、干湿混音与时序**（`音高（半音）`、`音高抖动 st`、`随机种子`、`干湿比`、`声像扩展`、`输出电平 dB`、`声像`、`时间散布 %`、`播放方向`）。
+- **微粒 · 颗粒振荡器**（左 3 × 3 + 右 2 × 3 居中）：左区为 **载波音色扭曲与颗粒核**（`波形`、`相位扭曲`、`音高（0=A3）`、`颗粒/秒`、`粒长 ms`、`颗粒包络`、`锁定扭曲`、`播放方向`、`时间散布 %`），右区为 **相位音高抖动与立体声输出**（`相位抖动`、`音高抖动 st`、`随机种子`、`声像`、`声像扩展`、`输出电平 dB`）。新建振荡器默认扭曲 0、相位抖动 0，保持纯波形；“相位扭曲”重塑每个波形周期，“锁定扭曲”保持当前扭曲深度，“相位抖动”按颗粒随机选择波表起始相位（沿用旧的“位置”参数槽位，旧版 Grain Osc 工程的该值会映射为扭曲深度）。
+- **微粒 · 颗粒采样**（左右对称 3 / 3 / 2）：顶部提供 `#1`–`#8` 采样槽切换（空槽居中显示 **导入 WAV…** 按钮，无内置演示 WAV；载入后显示实时波形与频谱）；左区为 **WAV 采样扫描与颗粒核**（`采样槽`、`采样位置`、`扫描 %/秒`、`颗粒/秒`、`粒长 ms`、`颗粒包络`、`锁定位置`、`播放方向`），右区为 **音高散布与立体声场输出**（`音高（半音）`、`位置抖动`、`音高抖动 st`、`声像`、`声像扩展`、`输出电平 dB`、`时间散布 %`、`随机种子`）。
 
-插件包含宿主集成补丁，可直接使用随附的模块文件安装。
+## 第一次使用
 
-## 使用
+将颗粒振荡器的左右输出分别连接到 Outs2 的左右输入。调低音量后按 ▶ 播放。
 
-运行 node scripts/host.mjs dev，然后打开终端显示的本地网址。
+右键点击任一微粒模块的标题栏：
 
-1. 用补丁加载控件打开 examples/granular-demo.json；也可按空格键，从 **Granular** 库添加模块。
-2. 示例连线为 **Grain Osc L → Grain Freeze Audio in → Outs2 L/R**。通过传输控件启动音频，所有连线模块必须处于同一层。
-3. Grain Freeze 录入一段音频后，将模式从 **Record** 切换为 **Freeze**。新输入会停止写入环形缓冲，已有颗粒继续播放；切回 0 可恢复录音。
-4. 使用文件声源时，选择 Grain Sample 的 **Sample slot**（1–8），右键其面板，选择 **Load WAV → slot…**，再将左右输出连接到 Outs2 或其他处理器。空槽会静音。
+- **关于**：在居中弹窗查看项目网址、版本、版权和 MIT 许可证。
+- **语言**：通过圆角下拉框同时切换所有微粒面板及模块右键菜单的 **简体中文**、**俄语** 和 **英语**；选择保存在本机，选 **跟随系统** 即可恢复跟随浏览器/系统语言（默认回退英语）。宿主主模块浏览器（按空格键或右键空白处）刻意保持英文名称（`Pulvis`、`Pulvis Grain Freeze`、`Pulvis Grain Osc`、`Pulvis Grain Sample`），与英文宿主菜单保持一致。
+- **面板颜色**：点击 32 色色板为当前哑光面板与强调色着色，点击 **↺ 跟随主题** 立即恢复默认深灰配色。
 
-右键任意颗粒模块并选择 **关于 CsModular 颗粒插件**，可查看版本、版权和许可证信息。
+宽屏面板和这些菜单需要使用当前源码集成重新构建的宿主。“颗粒包络”可选汉宁窗、三角窗或布莱克曼窗；冻结模块可选“录入/冻结”，另外两个模块可选“跟随/锁定”（分别锁定采样位置或扭曲深度）。点击选择器切换状态，可调制旋钮旁的小插孔仍可叠加控制率 CV 调制。
 
-Grain Osc 和 Grain Sample 只有立体声输出，不接受音频输入。Grain Freeze 接受单声道输入，将其写入私有的 192,000 帧环形缓冲（48 kHz 下 4 秒），也是库中唯一带干湿混合控制的模块。
+颗粒插件源码与 CsModular 宿主应用分别维护在独立仓库中。
 
-## 控制与调制
+## 启动和连接
 
-旋钮旁的小插孔接收叠加型控制率 CV；Seed、Sample slot、Scan 和 Waveform 不接收 CV。宿主会在信号进入静态控制插孔前转换音频连线。
+先安装 CsModular 宿主，再安装微粒插件；安装完成后直接打开 CsModular 宿主，插件会自动出现在宿主的模块列表中。按空格键（或右键空白画布）即可在 `Pulvis` 库中添加 `Pulvis Grain Freeze`、`Pulvis Grain Sample`、`Pulvis Grain Osc`，或通过补丁加载按钮打开示例工程 `pulvis-demo.json`（已同步到宿主 `public/patches/pulvis-demo.json`）。
 
-| 控制 | 旋钮范围 / 含义 | CV = 1 时的增量 |
-|---|---|---|
-| Density（密度） | 0–200 颗粒/秒；0 会让已有声部自然结束 | 100 颗粒/秒 |
-| Size（时长） | 2–500 毫秒；为保证读写安全，实时颗粒可能缩短 | 250 毫秒 |
-| Position / Phase warp（位置 / 相位扭曲） | 0–127 映射到 0–1；实时模式为最近至较旧的安全历史（48 kHz 下约 4 秒）；Sample 为读取位置；Osc 为每个周期内的相位扭曲深度。0 保持原波形，较高值会重塑谐波平衡 | 实时/采样：1 个声源跨度；Osc：1 个完整扭曲深度范围 |
-| Position jitter / Phase jitter（位置 / 相位抖动） | 0–127，声源跨度中的最大随机偏移；Osc 中按 Seed 为每颗粒随机选择波表起始相位 | 实时/采样：1 个声源跨度；Osc：1 个波形周期的相位抖动 |
-| Pitch（音高） | −48…+48 半音 | 12 半音 |
-| Pitch jitter（音高抖动） | 0–24 半音，每颗粒对称随机 | 12 半音 |
-| Window（窗函数） | 0 = Hann，1 = Triangle；阈值 0.5 | 1 |
-| Pan（声像） | 0 = 左，127 = 右；等功率增益 | 1 个归一化声像单位 |
-| Spread（扩展） | 0–127；随机声像范围最高 ±0.5 | 1 个归一化扩展单位 |
-| Freeze / Hold position（冻结 / 锁定位置） | 阈值 0.5；Freeze 停止实时写入，Sample 的 Hold position 暂停扫描并忽略 Position 变化；Osc 没有此控件 | 1 |
-| Wet mix（干湿混合） | 0–127，从干声到颗粒声；仅 Grain Freeze 使用 | 1 个归一化混合单位 |
-| Level（电平） | 0–127，0 到单位增益 | 1 个归一化电平单位 |
-| Seed（随机种子） | 整数 0–65534，无 CV；每个实例独立 | — |
-| Sample slot（采样槽） | 1–8，按提示中的方式取最近整数；仅 Grain Sample，无 CV | — |
-| Scan（扫描） | 每秒文件的 −100…+100%；0 表示停在 Position；仅 Grain Sample，无 CV。位置会自行移动并在文件边界循环；Hold 会暂停 | — |
-| Waveform（波形） | 0–3（按提示取整）= 正弦、三角、锯齿、方波（单周期，根音 220 Hz）；仅 Grain Osc，无 CV。锯齿/方波使用 24/23 个谐波，高音时会混叠 | — |
+- 将“颗粒振荡器”的左声道输出连接到“颗粒冻结”的音频输入，再将“颗粒冻结”的左右输出分别连接到 Outs2 的左右输入。开启音频播放。
+- 先让模块录入音频，将“冻结”选择器切到“冻结”，再按“捕捉快照”并把“播放来源”切到“快照”。快照属于当前 Freeze 实例；切回“录入”后环形缓冲可继续写入，已捕捉的快照不变。
+- 使用采样文件时，选择采样槽（顶部 `#1`–`#8` 或 `采样槽` 旋钮），直接点击空槽居中的 **导入 WAV…** 按钮或右键点击“颗粒采样”模块选择“导入 WAV”，再将左右输出连接到 Outs2。空槽默认静音，不包含内置演示 WAV。
+- 颗粒振荡器和颗粒采样是独立立体声声源，没有音频输入或干湿控件，可直接连接到 Outs2 或其他处理器。只有颗粒冻结器有音频输入与“干湿比”旋钮。
+- 连线的两个模块必须位于同一层。“输出电平 dB”范围为 −24 至 +12 dB；Osc/Sample 默认 −12 dB，Freeze 默认 −3 dB；CV 满量程增加 12 dB。Freeze 的干湿比为 0 时通过干声，为 127 时只输出颗粒声。
+- Freeze/Sample 的颗粒密度为 0–24 粒/秒，Osc 为 0–48；默认分别为 12 和 24。粒长为 2–400 ms；实时颗粒可能因环形缓冲读写安全而缩短。CV 满量程分别增加 24 或 48 粒/秒。
+- “触发时间散布”0–100%；0 保持规则节拍，100 将触发时刻最多偏移标称间隔的 ±45%，平均粒速不变。Seed 使散布序列可复现，旁边的 CV 插孔可独立调制散布量。
+- 窗函数：0 为汉宁窗，1 为三角窗，2 为布莱克曼窗；该设置作用于新生成的颗粒。播放方向可设为正向或反向，三个模块均可使用。
+- Freeze 的来源可选实时环形缓冲或该实例最近一次快照。反馈范围 0–0.95，默认 0；只在录入时把湿声颗粒回送到环形缓冲，写入信号限制在 ±1。空缓冲或仍被旧颗粒读取的备用表不会被快照覆盖。
 
-范围由 Csound 限幅。声源位置或相位扭曲深度、相位/位置抖动、音高、窗口、声像和粒长在每颗粒启动时采样。Position CV 会扫描新的实时/采样颗粒；Phase warp CV 设置新 Osc 颗粒的扭曲深度；Osc 的 Phase jitter 为每颗粒选择随机起始相位。Sample 的 Hold position 会暂停扫描；Freeze 控制实时录音。修改 Seed 只重置该实例的随机序列；要得到相同调度，还需重启补丁。
+共享颗粒核心保持线性，模块包装层按所选增益在输出端限制到 ±1；超过满量程时会硬削波。独立声源默认 −12 dB，为颗粒叠加留出约 3 dB 的额外余量。
 
-## 引擎与路由
+Sample 与 Freeze 在升调时使用带限 sinc 读表；Osc 使用按最高音高选择的谐波波表。频谱分别测量插值镜像和 Nyquist 折返：6 kHz 目标音旁的 18 kHz 插值镜像从 −35.2 降到 −101.1 dBc；48 kHz 下 +48 半音时，Sample 的 8 kHz 源音折叠到 16 kHz 的分量从约 −1.2 降到 −114.2 dBc，Freeze 降到 −113.5 dBc。
 
-调度器每个采样点累加 density / sr，每次跨过整数边界尝试创建一个颗粒。每个实例有 64 个可复用槽位；槽位占满时丢弃新触发，不抢占或截断活动颗粒。每个被接受的触发使用三个 Park–Miller 随机数，分别选择声源位置（Osc 中为起始相位）、音高和声像。
+每个 Freeze 实例为实时环形缓冲和两张私有快照表分配 3 × 8 秒存储；48 kHz 时共 1,152,000 个表帧。快照不会进入 Sample 的 WAV 槽，也不会保存到工程；重编译或重启后需要重新捕捉。
 
-核心每次渲染一个控制块（宿主 ksmps=4）。调度仍按采样点推进，因此在块内偏移 j 启动的颗粒年龄为 −j，窗函数在生命周期外钳制为静音：起止时间仍精确到采样点。每个声部维护年龄、时长、声源表、读取位置、速率和声像，并用音频率向量运算渲染，因此成本随**发声中的**颗粒数增长，而不是随每个采样点的总数增长。读取使用两个显式回绕索引和线性插值（tablexkt，尺寸 2，wrap）。
+性能只在一台机器上测得：Intel Core i5-12490F、Node 26.12、Csound 7 beta33 WASM、48 kHz、ksmps=4。定位到高密度 Osc 的主要开销来自每个控制块重复复制所有活跃颗粒状态；现在只保存本块可能复用的尾音槽。120 粒/秒 × 400 ms 压力场景早期配对测量从 80.3% 降到 62.2%；最新五次中位数为 65.3%（渲染 1.5 秒音频需 959–1,033 ms）。当前中位数：默认单个 Osc（24 粒/秒、80 ms）13.2%；单个/两个 Osc（48 粒/秒、400 ms）35.3%/70.6%；单个/两个 Sample（+48 半音、24 粒/秒、400 ms）36.4%/71.5%；Freeze 录满 8 秒后扣除录入开销的活动部分为 27.9%。默认 Osc 输出 RMS/峰值为 0.0859/0.1791，双个最大密度 Osc 为 0.4402/0.8785。每个 Freeze 的两张快照表使 WASM 线性内存增加约 6.16 MB；20 次复制额外耗时 7.85 ms。以上为离线渲染耗时与音频时长之比，不是整机 CPU 百分比或声卡回调测试。
 
-优化后的引擎逐采样调度，并按控制块向量化渲染活动颗粒，保持颗粒起止的采样精度。Hann 与 Triangle 窗口两端淡出至零；活动声部采用平滑增益补偿和峰值控制。Grain Freeze 混合干声与颗粒声；所有模块均应用 Level。
+不同电脑仍使用相同的密度范围：Freeze/Sample 为 0–24 粒/秒，Osc 为 0–48 粒/秒。插件无法读取宿主音频截止时间，也不会按设备自动调整上限。实际余量取决于 CPU、音频缓冲大小、宿主和浏览器负载及其他模块。以上数据只适用于标明的测试机；本轮 Windows 声卡枚举被系统拒绝，未能主观试听或测量实时掉帧。如实时播放中断，请减少 Density、Size 或实例数量。
 
-包装层以宿主 ksmps=4 运行：仅 Freeze 用 zar 读取音频输入；zkr 读取 CV；共享核心返回音频；zaw 把左右声道写入分配的电缆总线。插件**没有额外颗粒乐器、音频总线或直达声卡输出**；补丁的声卡端点仍是 Outs2。
+## WAV 支持范围
 
-宿主在 instr 1（Voice）或 instr 2（FX）内按模块插入顺序执行，且不会全局清空 Zak。若接收器排在声源之前，它会读到前一个 4 采样点的块（48 kHz 下约 83 μs）。插件保留了宿主已有的反馈行为，不额外增加一块延迟。
+单个 WAV 文件最大 256 MiB，时长不超过 5 分钟。每次应用运行最多载入 512 MiB 的 WAV；解码后的单声道采样数据合计不得超过 4,800 万帧。
 
-共享颗粒核心会先于模块包装层加载。补丁使用 Grain Sample 时才会创建对应采样表；音频始终通过宿主 Zak 电缆路由。
+支持采样率 8–192 kHz、单声道或立体声的 PCM 8/16/24/32 位、IEEE float32/64 和标准扩展 WAV 格式。立体声文件只读取左声道；暂不支持 RF64 和大端序 WAV。
 
-## 采样与限制
+采样槽在本次应用运行期间共享。关闭或刷新应用后，需要重新载入文件。替换采样文件会重启音频引擎，并清空实时录音缓冲。
 
-- WAV：单声道/立体声 PCM 8/16/24/32 位或 float32/64，包括标准 WAVE_FORMAT_EXTENSIBLE；8–192 kHz，2 帧至 300 秒。单文件最大 256 MiB；会话限制为源文件 512 MiB、解码后单声道总计 4,800 万帧。立体声只使用**左声道**作为单声道声源。Csound GEN01 解码，并由 ftsr 按原采样率校正播放。
-- 八个采样槽在**本应用会话内**由所有模块实例共享。文件会保留到 Stop/Start 和 Recompile，但不会嵌入补丁 JSON、写入 IndexedDB 或在关闭/刷新后恢复；届时需重新导入。
-- 替换采样时，音频引擎会重新加载，实时录音缓冲会清空。导出的 CSD 补丁也需要使用到的 WAV 文件。
-- Grain Osc 提供正弦、三角、锯齿和方波，根音为 220 Hz。高音区使用锯齿或方波可能产生混叠。
-- 循环播放采样时，文件边界可能出现咔嗒声；大幅移调也可能产生混叠。
-- 实时颗粒可能缩短，以确保读取位置位于已录制历史内。空的 Freeze 缓冲在收到音频前保持静音。
-- 每个实例最多有 64 个活动颗粒。高重叠时可降低 Density、Size 或模块实例数，以保持流畅播放。
+Csound 负责 WAV 解码和全部音频处理。JavaScript 只负责选择文件、检查文件头、将文件传入 Csound 虚拟文件系统，以及传递界面参数；不会在 JavaScript 中处理颗粒音频。
 
-## 许可证
+## 插件开发
 
-版权 © 2026 Zhang Shengwei。插件以 MIT 许可证发布，详见 [LICENSE](LICENSE)。
+ 宿主集成升级到包含 WAV 并发修复的版本。完整参数说明和 DSP 架构见英文指南 `README.md`。原创引擎采用 MIT 许可证；参考来源和许可证判断见 `SOURCES.md`。
+
+## 桌面安装包
+
+0.0.5 版提供自绘原生 Windows x64 向导和 Linux x64 Debian 包。Windows x64 与 Linux x64 已在 CsModular 0.1.5（`10136ca`）上通过全新安装验收，覆盖三个模块、WAV 导入、Voice／FX 路由、新建工程保存重开和卸载。Debian 包声明运行依赖，由系统包管理器安装，不会把 GTK 或 WebKit 库打包进去。macOS Apple Silicon 与 Intel 尚未构建或实机验收，仍待验证。安装器面向带有颗粒集成的 CsModular 0.1.5；插件固定安装到 `libraries/pulvis`，升级时会把旧 `granular` 文件夹改名为 `pulvis` 并更新宿主库索引。集成补丁会把旧工程中的 `granular` 库标识映射到 Pulvis。Windows 安装器不需要 WebView2，界面跟随 Windows 系统界面语言（简体中文、俄语或英语兜底）。
+
+下载： [Windows x64 安装器](https://github.com/NJyutong/csmodular-pulvis/releases/download/v0.0.5/Pulvis-0.0.5-windows-x64.exe) · [Linux x64 Debian 包](https://github.com/NJyutong/csmodular-pulvis/releases/download/v0.0.5/Pulvis-0.0.5-linux-x64.deb) · [源码包](https://github.com/NJyutong/csmodular-pulvis/releases/download/v0.0.5/Pulvis-0.0.5-source.zip) · [SHA-256 校验和](https://github.com/NJyutong/csmodular-pulvis/releases/download/v0.0.5/SHA256SUMS.txt)。
+
+全新安装步骤：准备好已集成颗粒功能且尚未安装插件的 CsModular 0.1.5，先关闭宿主。Linux 使用 `sudo apt install ./Pulvis-0.0.5-linux-x64.deb` 安装 Debian 包，再从应用菜单启动 Pulvis Installer；选择宿主的 `libraries` 文件夹，安装器会写入 `pulvis`。系统包管理器会安装 Debian 包声明的运行依赖，包内不捆绑 GTK 或 WebKit 库。Windows 则运行安装向导并选择 `libraries/pulvis`。重新启动 CsModular，在模块浏览器的 `Pulvis` 库中确认三个模块均已出现，放置到画布后可见“微粒 · 颗粒冻结”“微粒 · 颗粒采样”“微粒 · 颗粒振荡器”；为“微粒 · 颗粒采样”导入 WAV，再新建工程、保存并重开。Windows 可在“已安装的应用”中卸载，或运行插件目录中的 `unins000.exe`。Debian 先在 Pulvis Installer 中卸载插件，再按需运行 `sudo apt remove pulvis-installer` 移除安装器。
+
+0.0.5 平台验收记录列出宿主基线、落盘载荷哈希、保存重开结果、覆盖范围和已知宿主问题。本次验收不包含物理声卡回环测试。
+
+
+## 构建产物与临时文件
+
+在 Windows 运行 `npm run build:windows-installer`，在 Linux 运行 `npm run build:linux-deb`。通过校验的安装包及其 `.sha256` 文件输出到 `release-assets/<version>/`；三种包齐全后运行 `npm run release:checksums` 生成 `SHA256SUMS.txt`。构建器会先暂存安装包、重新读取并核对 SHA-256，再发布到输出目录。
+
+每次构建使用独立临时目录（Windows：`D:\csmodular-tools\pulvis-builds`；WSL：`/mnt/d/csmodular-tools/pulvis-builds`；原生 Linux：系统临时目录）。成功时，仅在安装包和校验文件核验完成后删除本次目录；失败时，将命令输出和诊断信息保存在 `test-results/build-logs/`，再清理本次可回收的中间文件。
+
+CI 会保留本次独立任务目录，直到安装包和 SHA 校验文件上传完成。失败作业先上传诊断日志；最后的清理步骤只删除本次任务目录。详见[构建与清理说明](docs/BUILDING.md)。

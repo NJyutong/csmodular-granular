@@ -1,78 +1,46 @@
-# Plugin Project Structure
+# Pulvis project structure
 
-This map covers the standalone CsModular Granular plugin. The host application is a separate repository. The plugin source is authoritative for plugin behavior; integration/csmodular.patch records the corresponding host-side changes.
+Pulvis is a standalone granular synthesis plugin library for the CsModular host. This repository contains the module definitions, shared Csound engine, host integration patch, desktop installers, example patch and three user manuals. The host application is maintained separately.
 
-## Repository map
+## Main files
 
-    csmodular-granular/
-    ├── AGENTS.md                         AI instructions for this plugin
-    ├── docs/
-    │   ├── README.md                     English technical-doc index
-    │   ├── AI_CONTEXT.md                 Fast technical context for AI and maintainers
-    │   ├── AI_PROJECT_READING_PROMPT.md  Suggested first-pass reading order
-    │   ├── PROJECT_STRUCTURE.md           This directory map
-    │   └── INTEGRATION.md                Host integration and maintenance guide
-    ├── README.md                         English user manual
-    ├── README.zh-CN.md                   Simplified Chinese user manual
-    ├── README.ru.md                      Russian user manual
-    ├── CHECKS.md                         Dated engineering/check history
-    ├── VALIDATION.md                     DSP validation scope and evidence
-    ├── validation-dsp.json               Machine-readable DSP measurements
-    ├── validation-dsp-node.json          Node/WASM DSP comparison results
-    ├── SOURCES.md                         Provenance and license decisions
-    ├── reference-files.json               Reference file/hash manifest
-    ├── LICENSE                            Plugin MIT license
-    ├── _index.json / _meta.json           CsModular library metadata
-    ├── csound/
-    │   └── GrainCore.txt                  Single shared Csound grain engine
-    ├── modules/
-    │   ├── GrainFreeze.js / .txt          Live input ring buffer and Freeze
-    │   ├── GrainSample.js / .txt          WAV-backed granular source
-    │   └── GrainOsc.js / .txt              Wavetable-backed granular source
-    ├── scripts/
-    │   ├── build-modules.mjs               Generate module artifacts and demo
-    │   ├── install.mjs                     Apply host patch and install plugin
-    │   ├── host.mjs                        Launch/build the sibling host checkout
-    │   └── record-sources.mjs              Record reference file hashes
-    ├── integration/
-    │   └── csmodular.patch                 Replayable host integration patch
-    ├── examples/
-    │   └── granular-demo.json              Example patch
-    ├── tests/                               Contract, DSP, install, and app checks
-    ├── tools/
-    │   └── render-panels.mjs                Panel rendering helper
-    └── test-results/                        Ignored temporary outputs, when present
+```text
+csmodular-pulvis/
+├── README.md                         English user manual
+├── README.zh-CN.md                   Simplified Chinese user manual
+├── README.ru.md                      Russian user manual
+├── LICENSE                           MIT license
+├── _index.json / _meta.json          Library metadata
+├── csound/GrainCore.txt              Shared Csound grain engine
+├── modules/                          Paired JavaScript UI and Csound UDO files
+├── integration/
+│   ├── csmodular.patch               Host integration changes (UI, HiDPI, Csound tables, WAV, locale)
+│   └── wav-session-compat.patch      Upgrade patch for hosts with earlier WAV session integration
+├── assets/                           Product icon source, PNG/ICO/ICNS icons and social preview
+├── scripts/install.mjs               Install into a host source checkout
+├── scripts/build-artifacts.mjs       Isolated package staging and cleanup
+├── installer/                        Windows Inno and Linux Tauri installers
+├── release-notes/                    Versioned multilingual release notes
+├── .github/workflows/                Package and host-check workflows
+├── tests/                            Contracts, DSP, host, UI and package checks
+├── examples/pulvis-demo.json         Example patch
+└── docs/                             Integration, build, test and setup guides
+```
 
-The exact contents of generated directories can change. Confirm the current tree before relying on a path. node_modules is an external junction/cache and is not source.
+## Runtime flow
 
-## Authoritative files and generated copies
+The host loads each JavaScript module definition and its paired Csound wrapper. `src/ui/PulvisPanel.js` renders the matte graphite widescreen (`500 × 300`) hardware panels, polls Csound `giScope_*` / `giSpectrum_*` visualizer tables for live oscilloscope and 2048-point Hann FFT displays, and pairs with `ModuleContextMenu.js` (language, centered About dialog, color swatches + theme reset) while keeping the host `ContextMenu.js` browser in English. The Csound wrappers call `CMGrainCoreExtended` from `csound/GrainCore.txt` and exchange audio through the host's Zak cable buses. Host `instr 1` is the Voice layer; `instr 2` is the FX layer.
 
-- csound/GrainCore.txt is the only plugin source for the shared grain algorithm.
-- modules/GrainFreeze.js, GrainSample.js, and GrainOsc.js define the editor surfaces; their paired .txt files are thin Csound wrappers.
-- scripts/build-modules.mjs regenerates checked-in module artifacts and the example from the plugin sources.
-- scripts/install.mjs verifies or applies integration/csmodular.patch, copies module files and metadata into the host library, copies GrainCore.txt into the host's shared Csound modules, and copies the demo patch into the host.
-- The installer also copies the root user manuals, SOURCES.md, and LICENSE. It does not copy this docs/ directory.
-- The host's installed files are deployment copies. Make plugin changes here, then run the installer when host synchronization is part of the task.
+Grain Sample's interface selects a WAV file (via the empty-slot **Open WAV…** button or right-click menu; no demo WAV is bundled), validates its header, and transfers the bytes to Csound's virtual file system. Csound performs file decoding and all grain audio processing.
 
-## Runtime relationship
+## Editing and installation
 
-The host loads JavaScript module definitions through its library system. CsoundGenerator emits the module calls and dependencies; CsoundEngine compiles and runs the orchestra. Host instr 1 is the Voice layer and instr 2 is the FX layer. Module audio travels over the host's Zak cable buses.
+When a module's controls, ports or DSP arguments change, update its JavaScript definition and Csound wrapper together. Keep the shared core, library metadata, example patch and all three user manuals aligned.
 
-Each plugin wrapper performs Zak I/O at the host block size and calls CMGrainCore. The core owns the grain pool and synthesis state. Grain Sample's UI path selects and validates a WAV header and transfers bytes to Csound's virtual file system; Csound performs decoding and all audio-rate grain processing.
+The command-line installer applies `integration/csmodular.patch` when needed and copies the modules, metadata, shared core, manuals, license and example into a source checkout. The desktop installer targets a compatible host that already includes that integration; it writes the shared core into the host's `csound/modules/` directory.
 
-## Useful commands
+```powershell
+node scripts/install.mjs E:/paper/csmodular-main
+```
 
-Run from the plugin repository root:
-
-    node scripts/build-modules.mjs
-    node scripts/install.mjs E:/paper/csmodular-main
-    node scripts/host.mjs dev E:/paper/csmodular-main
-    node scripts/host.mjs build E:/paper/csmodular-main
-    npm run test:unit
-    npm run test:dsp
-    npm run test:dsp-node
-    npm run test:install
-    npm run test:integration
-    npm run test:system
-
-These checks have different environment needs. See package.json, VALIDATION.md, and the relevant test file before selecting a command. Historical test results do not prove that a current untested change passes.
+Use `npm run check:quick` for fast regressions and package checks, and `npm run check:full` for complete host, browser, DSP and package acceptance. See [TESTING.md](TESTING.md) for isolated host requirements and [BUILDING.md](BUILDING.md) for package builds, checksums, logs and temporary-file cleanup. Native Tauri builds require Rust and platform system dependencies.

@@ -2,19 +2,34 @@
   "modules": [
     {
       "name": "GrainFreeze",
-      "displayName": "Grain Freeze",
+      "displayName": "Pulvis Grain Freeze",
+      "displayNameI18n": {
+        "en": "Pulvis Grain Freeze",
+        "zh": "微粒 · 颗粒冻结",
+        "ru": "Пульвис · Гранулярная заморозка"
+      },
       "category": "fx",
       "status": "passable"
     },
     {
       "name": "GrainSample",
-      "displayName": "Grain Sample",
+      "displayName": "Pulvis Grain Sample",
+      "displayNameI18n": {
+        "en": "Pulvis Grain Sample",
+        "zh": "微粒 · 颗粒采样",
+        "ru": "Пульвис · Гранулярный сэмпл"
+      },
       "category": "sample",
       "status": "passable"
     },
     {
       "name": "GrainOsc",
-      "displayName": "Grain Osc",
+      "displayName": "Pulvis Grain Osc",
+      "displayNameI18n": {
+        "en": "Pulvis Grain Osc",
+        "zh": "微粒 · 颗粒振荡器",
+        "ru": "Пульвис · Гранулярный осциллятор"
+      },
       "category": "osc",
       "status": "passable"
     }

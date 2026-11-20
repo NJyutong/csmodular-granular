@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="field" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#24223b"/>
+      <stop offset="1" stop-color="#11111c"/>
+    </linearGradient>
+    <linearGradient id="wave" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#8a6cff"/>
+      <stop offset="0.52" stop-color="#be8cff"/>
+      <stop offset="1" stop-color="#69d9e8"/>
+    </linearGradient>
+  </defs>
+  <rect x="48" y="48" width="928" height="928" rx="252" fill="url(#field)"/>
+  <circle cx="512" cy="512" r="314" fill="#1a192a" stroke="#39354f" stroke-width="14"/>
+  <circle cx="512" cy="512" r="244" fill="none" stroke="#48415f" stroke-width="8" stroke-dasharray="7 29"/>
+  <path d="M210 512h112l48-116 82 232 76-176 76 122 54-62h156" fill="none" stroke="url(#wave)" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="512" cy="512" r="17" fill="#f4eaff"/>
+  <circle cx="279" cy="512" r="13" fill="#8a6cff"/>
+  <circle cx="745" cy="512" r="13" fill="#69d9e8"/>
+</svg>

@@ -1,0 +1,20 @@
+[package]
+name = "pulvis-installer"
+version = "0.0.5"
+description = "Cross-platform installer for the Pulvis library"
+authors = ["Zhang Shengwei"]
+edition = "2021"
+rust-version = "1.90"
+
+[lib]
+name = "pulvis_installer_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7.1", features = [] }
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2.12.1", features = [] }
+tauri-plugin-dialog = "2.8.4"

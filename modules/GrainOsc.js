@@ -1,21 +1,25 @@
 export const GrainOscModule = {
     "type": "GrainOsc",
-    "displayName": "Grain Osc",
+    "displayName": "Pulvis Grain Osc",
     "displayNameI18n": {
-        "en": "Grain Osc",
-        "zh": "颗粒振荡器",
-        "ru": "Гранулярный осциллятор"
+        "en": "Pulvis Grain Osc",
+        "zh": "微粒 · 颗粒振荡器",
+        "ru": "Пульвис · Гранулярный осциллятор"
     },
     "category": "osc",
     "status": "passable",
-    "gridHeight": 35,
+    "pulvisStudio": true,
+    "pulvisVersion": "0.0.5",
+    "width": 500,
+    "height": 300,
+    "gridHeight": 20,
     "originalName": "GrainOsc",
     "defaultParams": [],
-    "tooltip": "Grain generator with a built-in wave (sine, triangle, saw or square), no input needed. Pitch 0 = 220 Hz (A3). Phase warp reshapes phase progression within each cycle and changes harmonic balance; 0 leaves the selected wave unchanged. Phase jitter varies the starting phase of each grain, with Seed setting the repeatable sequence. Up to 64 grains at once. Small jacks beside knobs add modulation.",
+    "tooltip": "Grain generator with a built-in wave (sine, triangle, saw or square), no input needed. Pitch 0 = 220 Hz (A3). Phase warp reshapes phase progression within each cycle; phase jitter varies each grain start. Forward/reverse changes grain direction. Time scatter independently varies trigger times while keeping their mean rate. Seed repeats both random sequences. Up to 64 grains at once. Small jacks beside knobs add modulation.",
     "tooltipI18n": {
-        "en": "Grain generator with a built-in wave (sine, triangle, saw or square), no input needed. Pitch 0 = 220 Hz (A3). Phase warp reshapes phase progression within each cycle and changes harmonic balance; 0 leaves the selected wave unchanged. Phase jitter varies the starting phase of each grain, with Seed setting the repeatable sequence. Up to 64 grains at once. Small jacks beside knobs add modulation.",
-        "zh": "内置波形（正弦、三角、锯齿、方波）的颗粒发生器，无需输入。音高 0 = 220 Hz（A3）。相位扭曲会在每个周期内改变相位推进速度并重塑谐波；0 保持所选波形不变。相位抖动会改变每个颗粒在波表中的起始相位，Seed 决定可重复的随机序列。最多同时 64 个颗粒；旋钮旁的小插孔可叠加调制。",
-        "ru": "Генератор гранул со встроенной волной (синус, треугольник, пила, меандр), вход не нужен. Высота 0 = 220 Гц (A3). Деформация фазы меняет её ход внутри каждого цикла и перераспределяет гармоники; 0 оставляет выбранную волну без изменений. Разброс фазы меняет начальную фазу для каждой гранулы, а Seed задаёт повторяемую последовательность. До 64 гранул одновременно. Малые гнёзда рядом с регуляторами принимают модуляцию."
+        "en": "Grain generator with a built-in wave (sine, triangle, saw or square), no input needed. Pitch 0 = 220 Hz (A3). Phase warp reshapes phase progression within each cycle; phase jitter varies each grain start. Forward/reverse changes grain direction. Time scatter independently varies trigger times while keeping their mean rate. Seed repeats both random sequences. Up to 64 grains at once. Small jacks beside knobs add modulation.",
+        "zh": "内置正弦、三角、锯齿或方波的颗粒发生器，无需输入。音高 0 = 220 Hz（A3）。相位扭曲改变周期内的相位推进；相位抖动改变每颗粒起始相位。正向／反向改变颗粒方向。时间散布独立改变触发时刻，同时保持平均粒速。Seed 可复现两组随机序列。最多同时 64 个颗粒；旋钮旁的小插孔可叠加调制。",
+        "ru": "Генератор гранул со встроенной синусоидой, треугольником, пилой или меандром. Высота 0 = 220 Гц (A3). Деформация меняет ход фазы, разброс фазы — старт гранулы. Направление «вперёд/назад» меняет ход гранулы. Разброс времени независимо меняет моменты запуска, сохраняя среднюю плотность. Seed повторяет обе случайные последовательности. До 64 гранул одновременно. Малые гнёзда принимают CV."
     },
     "params": [
         1,
@@ -28,13 +32,13 @@ export const GrainOscModule = {
         8,
         9,
         10,
-        11,
         12,
         13,
-        14
+        14,
+        15,
+        16
     ],
     "inputs": [
-        101,
         102,
         103,
         104,
@@ -45,8 +49,9 @@ export const GrainOscModule = {
         109,
         110,
         111,
-        112,
-        113
+        113,
+        115,
+        116
     ],
     "outputs": [
         201,
@@ -56,8 +61,8 @@ export const GrainOscModule = {
         {
             "componentType": "TextLabel",
             "id": "900",
-            "x": 12,
-            "y": 25,
+            "x": 16,
+            "y": 21,
             "text": "WAVE: 0 sine · 1 tri · 2 saw · 3 square",
             "textI18n": {
                 "en": "WAVE: 0 sine · 1 tri · 2 saw · 3 square",
@@ -69,97 +74,81 @@ export const GrainOscModule = {
         {
             "componentType": "TextLabel",
             "id": "901",
-            "x": 12,
-            "y": 40,
-            "text": "Pitch 0 = 220 Hz (A3)",
+            "x": 256,
+            "y": 21,
+            "text": "Pitch 0 = 220 Hz (A3) · ▲ marks 0 center",
             "textI18n": {
-                "en": "Pitch 0 = 220 Hz (A3)",
-                "zh": "音高 0 = 220 Hz（A3）",
-                "ru": "Высота 0 = 220 Гц (A3)"
+                "en": "Pitch 0 = 220 Hz (A3) · ▲ marks 0 center",
+                "zh": "音高 0 = 220 Hz（A3）· ▲ 指示零位",
+                "ru": "Высота 0 = 220 Гц (A3) · ▲ метка нуля"
             },
-            "fontSize": 9
+            "fontSize": 10
+        },
+        {
+            "componentType": "Line",
+            "id": "920",
+            "x": 12,
+            "y": 94,
+            "length": 476,
+            "orientation": "Horizontal",
+            "width": 1,
+            "color": "#1e293b"
         },
         {
             "componentType": "TextLabel",
             "id": "910",
-            "x": 12,
-            "y": 64,
-            "text": "1 · Tone",
+            "x": 18,
+            "y": 104,
+            "text": "Carrier Tone Warp & Grain Core",
             "textI18n": {
-                "en": "1 · Tone",
-                "zh": "1 · 音色",
-                "ru": "1 · Тон"
+                "en": "Carrier Tone Warp & Grain Core",
+                "zh": "载波音色扭曲与颗粒核",
+                "ru": "Осциллятор, фаза и ядро гранул"
             },
             "fontSize": 11
         },
         {
             "componentType": "TextLabel",
             "id": "911",
-            "x": 12,
-            "y": 152,
-            "text": "2 · Shape & randomness",
+            "x": 264,
+            "y": 104,
+            "text": "Phase/Pitch Jitter & Stereo Out",
             "textI18n": {
-                "en": "2 · Shape & randomness",
-                "zh": "2 · 颗粒塑形与随机",
-                "ru": "2 · Форма и случайность"
-            },
-            "fontSize": 11
-        },
-        {
-            "componentType": "TextLabel",
-            "id": "912",
-            "x": 12,
-            "y": 301,
-            "text": "3 · Stereo output",
-            "textI18n": {
-                "en": "3 · Stereo output",
-                "zh": "3 · 立体声输出",
-                "ru": "3 · Стереовыход"
-            },
-            "fontSize": 11
-        },
-        {
-            "componentType": "TextLabel",
-            "id": "913",
-            "x": 12,
-            "y": 392,
-            "text": "Advanced · hold & dry input",
-            "textI18n": {
-                "en": "Advanced · hold & dry input",
-                "zh": "进阶 · 锁定与干声混合",
-                "ru": "Далее · фиксация и микс"
+                "en": "Phase/Pitch Jitter & Stereo Out",
+                "zh": "相位音高抖动与立体声输出",
+                "ru": "Разброс фазы/высоты и стерео"
             },
             "fontSize": 11
         },
         {
             "componentType": "Knob",
             "id": "1",
-            "x": 12,
-            "y": 188,
+            "x": 18,
+            "y": 181,
             "size": "medium",
             "min": 0,
-            "max": 200,
+            "max": 48,
             "defaultValue": 24,
             "csoundName": "Density"
         },
         {
             "componentType": "TextLabel",
             "id": "300",
-            "x": 12,
-            "y": 174,
+            "x": 18,
+            "y": 168,
             "text": "Grains/s",
             "textI18n": {
                 "en": "Grains/s",
                 "zh": "颗粒/秒",
                 "ru": "Гранул/с"
             },
-            "fontSize": 9
+            "fontSize": 10
         },
         {
             "componentType": "Input",
             "id": "102",
-            "x": 51,
-            "y": 191,
+            "x": 73,
+            "y": 184,
             "jackType": "control",
             "bandwidth": "static",
             "ConnectorName": "Grains/s CV",
@@ -173,10 +162,10 @@ export const GrainOscModule = {
             "componentType": "Knob",
             "id": "2",
             "x": 94,
-            "y": 188,
+            "y": 181,
             "size": "medium",
             "min": 2,
-            "max": 500,
+            "max": 400,
             "defaultValue": 80,
             "csoundName": "Size"
         },
@@ -184,26 +173,26 @@ export const GrainOscModule = {
             "componentType": "TextLabel",
             "id": "301",
             "x": 94,
-            "y": 174,
+            "y": 168,
             "text": "Size ms",
             "textI18n": {
                 "en": "Size ms",
-                "zh": "粒长（ms）",
+                "zh": "粒长 ms",
                 "ru": "Длина, мс"
             },
-            "fontSize": 9
+            "fontSize": 10
         },
         {
             "componentType": "Input",
             "id": "103",
-            "x": 133,
-            "y": 191,
+            "x": 149,
+            "y": 184,
             "jackType": "control",
             "bandwidth": "static",
             "ConnectorName": "Size ms CV",
             "connectorNameI18n": {
                 "en": "Size ms CV",
-                "zh": "粒长（ms） 调制输入",
+                "zh": "粒长 ms 调制输入",
                 "ru": "Модуляция: Длина, мс"
             }
         },
@@ -211,7 +200,7 @@ export const GrainOscModule = {
             "componentType": "Knob",
             "id": "3",
             "x": 94,
-            "y": 100,
+            "y": 133,
             "size": "medium",
             "min": 0,
             "max": 127,
@@ -222,34 +211,34 @@ export const GrainOscModule = {
             "componentType": "TextLabel",
             "id": "302",
             "x": 94,
-            "y": 86,
+            "y": 120,
             "text": "Phase warp",
             "textI18n": {
                 "en": "Phase warp",
                 "zh": "相位扭曲",
-                "ru": "Деформ. фазы"
+                "ru": "Деф. фазы"
             },
-            "fontSize": 9
+            "fontSize": 10
         },
         {
             "componentType": "Input",
             "id": "104",
-            "x": 133,
-            "y": 103,
+            "x": 149,
+            "y": 136,
             "jackType": "control",
             "bandwidth": "static",
             "ConnectorName": "Phase warp CV",
             "connectorNameI18n": {
                 "en": "Phase warp CV",
                 "zh": "相位扭曲 调制输入",
-                "ru": "Модуляция: Деформ. фазы"
+                "ru": "Модуляция: Деф. фазы"
             }
         },
         {
             "componentType": "Knob",
             "id": "4",
-            "x": 12,
-            "y": 245,
+            "x": 264,
+            "y": 149,
             "size": "medium",
             "min": 0,
             "max": 127,
@@ -259,73 +248,74 @@ export const GrainOscModule = {
         {
             "componentType": "TextLabel",
             "id": "303",
-            "x": 12,
-            "y": 231,
+            "x": 264,
+            "y": 136,
             "text": "Phase jitter",
             "textI18n": {
                 "en": "Phase jitter",
                 "zh": "相位抖动",
-                "ru": "Разброс фазы"
+                "ru": "Разбр. фазы"
             },
-            "fontSize": 9
+            "fontSize": 10
         },
         {
             "componentType": "Input",
             "id": "105",
-            "x": 51,
-            "y": 248,
+            "x": 319,
+            "y": 152,
             "jackType": "control",
             "bandwidth": "static",
             "ConnectorName": "Phase jitter CV",
             "connectorNameI18n": {
                 "en": "Phase jitter CV",
                 "zh": "相位抖动 调制输入",
-                "ru": "Модуляция: Разброс фазы"
+                "ru": "Модуляция: Разбр. фазы"
             }
         },
         {
             "componentType": "Knob",
             "id": "5",
-            "x": 176,
-            "y": 100,
+            "x": 170,
+            "y": 133,
             "size": "medium",
             "min": -48,
             "max": 48,
             "defaultValue": 0,
+            "snapping": true,
             "csoundName": "Pitch"
         },
         {
             "componentType": "TextLabel",
             "id": "304",
-            "x": 176,
-            "y": 86,
-            "text": "Pitch st (0=A3)",
+            "x": 170,
+            "y": 120,
+            "text": "Pitch (0=A3)",
             "textI18n": {
-                "en": "Pitch st (0=A3)",
+                "en": "Pitch (0=A3)",
                 "zh": "音高（0=A3）",
-                "ru": "Высота (0=A3)"
+                "ru": "Высота (A3)"
             },
-            "fontSize": 9
+            "fontSize": 10
         },
         {
             "componentType": "Input",
             "id": "106",
-            "x": 215,
-            "y": 103,
+            "x": 225,
+            "y": 136,
             "jackType": "control",
             "bandwidth": "static",
-            "ConnectorName": "Pitch st (0=A3) CV",
+            "ConnectorName": "Pitch (0=A3) CV",
             "connectorNameI18n": {
-                "en": "Pitch st (0=A3) CV",
+                "en": "Pitch (0=A3) CV",
                 "zh": "音高（0=A3） 调制输入",
-                "ru": "Модуляция: Высота (0=A3)"
+                "ru": "Модуляция: Высота (A3)"
             }
         },
         {
             "componentType": "Knob",
             "id": "6",
-            "x": 94,
-            "y": 245,
+            "x": 340,
+            "y": 149,
             "size": "medium",
             "min": 0,
             "max": 24,
@@ -335,78 +325,78 @@ export const GrainOscModule = {
         {
             "componentType": "TextLabel",
             "id": "305",
-            "x": 94,
-            "y": 231,
+            "x": 340,
+            "y": 136,
             "text": "Pitch jitter",
             "textI18n": {
                 "en": "Pitch jitter",
-                "zh": "音高抖动（半音）",
-                "ru": "Разброс выс."
+                "zh": "音高抖动 st",
+                "ru": "Разбр. выс."
             },
-            "fontSize": 9
+            "fontSize": 10
         },
         {
             "componentType": "Input",
             "id": "107",
-            "x": 133,
-            "y": 248,
+            "x": 395,
+            "y": 152,
             "jackType": "control",
             "bandwidth": "static",
             "ConnectorName": "Pitch jitter CV",
             "connectorNameI18n": {
                 "en": "Pitch jitter CV",
-                "zh": "音高抖动（半音） 调制输入",
-                "ru": "Модуляция: Разброс выс."
+                "zh": "音高抖动 st 调制输入",
+                "ru": "Модуляция: Разбр. выс."
             }
         },
         {
             "componentType": "ButtonIncDec",
             "id": "7",
-            "x": 176,
-            "y": 194,
-            "width": 57,
-            "items": "Hann,Triangle",
+            "x": 170,
+            "y": 185,
+            "width": 58,
+            "items": "Hann,Triangle,Blackman",
             "itemsI18n": {
-                "en": "Hann,Triangle",
-                "zh": "汉宁窗,三角窗",
-                "ru": "Ханн,Треуг."
+                "en": "Hann,Triangle,Blackman",
+                "zh": "汉宁窗,三角窗,布莱克曼窗",
+                "ru": "Ханн,Треуг.,Блэкман"
             },
             "initialIndex": 0,
-            "binaryThreshold": true,
+            "indexValue": true,
             "csoundName": "Window"
         },
         {
             "componentType": "TextLabel",
             "id": "306",
-            "x": 176,
-            "y": 174,
-            "text": "Grain window",
+            "x": 170,
+            "y": 168,
+            "text": "Window",
             "textI18n": {
-                "en": "Grain window",
+                "en": "Window",
                 "zh": "颗粒包络",
-                "ru": "Окно гранулы"
+                "ru": "Окно"
             },
-            "fontSize": 9
+            "fontSize": 10
         },
         {
             "componentType": "Input",
             "id": "108",
-            "x": 242,
-            "y": 191,
+            "x": 231,
+            "y": 184,
             "jackType": "control",
             "bandwidth": "static",
-            "ConnectorName": "Grain window CV",
+            "ConnectorName": "Window CV",
             "connectorNameI18n": {
-                "en": "Grain window CV",
+                "en": "Window CV",
                 "zh": "颗粒包络 调制输入",
-                "ru": "Модуляция: Окно гранулы"
+                "ru": "Модуляция: Окно"
             }
         },
         {
             "componentType": "Knob",
             "id": "8",
-            "x": 12,
-            "y": 337,
+            "x": 264,
+            "y": 221,
             "size": "medium",
             "min": 0,
             "max": 127,
@@ -416,21 +406,21 @@ export const GrainOscModule = {
         {
             "componentType": "TextLabel",
             "id": "307",
-            "x": 12,
-            "y": 323,
+            "x": 264,
+            "y": 208,
             "text": "Pan",
             "textI18n": {
                 "en": "Pan",
                 "zh": "声像",
                 "ru": "Панорама"
             },
-            "fontSize": 9
+            "fontSize": 10
         },
         {
             "componentType": "Input",
             "id": "109",
-            "x": 51,
-            "y": 340,
+            "x": 319,
+            "y": 224,
             "jackType": "control",
             "bandwidth": "static",
             "ConnectorName": "Pan CV",
@@ -443,8 +433,8 @@ export const GrainOscModule = {
         {
             "componentType": "Knob",
             "id": "9",
-            "x": 94,
-            "y": 337,
+            "x": 340,
+            "y": 221,
             "size": "medium",
             "min": 0,
             "max": 127,
@@ -454,36 +444,36 @@ export const GrainOscModule = {
         {
             "componentType": "TextLabel",
             "id": "308",
-            "x": 94,
-            "y": 323,
+            "x": 340,
+            "y": 208,
             "text": "Pan spread",
             "textI18n": {
                 "en": "Pan spread",
                 "zh": "声像扩展",
-                "ru": "Разброс пан."
+                "ru": "Разбр. пан."
             },
-            "fontSize": 9
+            "fontSize": 10
         },
         {
             "componentType": "Input",
             "id": "110",
-            "x": 133,
-            "y": 340,
+            "x": 395,
+            "y": 224,
             "jackType": "control",
             "bandwidth": "static",
             "ConnectorName": "Pan spread CV",
             "connectorNameI18n": {
                 "en": "Pan spread CV",
                 "zh": "声像扩展 调制输入",
-                "ru": "Модуляция: Разброс пан."
+                "ru": "Модуляция: Разбр. пан."
             }
         },
         {
             "componentType": "ButtonIncDec",
             "id": "10",
-            "x": 12,
-            "y": 434,
-            "width": 57,
+            "x": 18,
+            "y": 233,
+            "width": 58,
             "items": "Follow,Hold",
             "itemsI18n": {
                 "en": "Follow,Hold",
@@ -497,111 +487,74 @@ export const GrainOscModule = {
         {
             "componentType": "TextLabel",
             "id": "309",
-            "x": 12,
-            "y": 414,
+            "x": 18,
+            "y": 216,
             "text": "Hold warp",
             "textI18n": {
                 "en": "Hold warp",
                 "zh": "锁定扭曲",
-                "ru": "Фикс. деформ."
+                "ru": "Фикс. фазы"
             },
-            "fontSize": 9
+            "fontSize": 10
         },
         {
             "componentType": "Input",
             "id": "111",
-            "x": 78,
-            "y": 431,
+            "x": 79,
+            "y": 232,
             "jackType": "control",
             "bandwidth": "static",
             "ConnectorName": "Hold warp CV",
             "connectorNameI18n": {
                 "en": "Hold warp CV",
                 "zh": "锁定扭曲 调制输入",
-                "ru": "Модуляция: Фикс. деформ."
-            }
-        },
-        {
-            "componentType": "Knob",
-            "id": "11",
-            "x": 94,
-            "y": 428,
-            "size": "medium",
-            "min": 0,
-            "max": 127,
-            "defaultValue": 127,
-            "csoundName": "Mix"
-        },
-        {
-            "componentType": "TextLabel",
-            "id": "310",
-            "x": 94,
-            "y": 414,
-            "text": "Grain/dry mix",
-            "textI18n": {
-                "en": "Grain/dry mix",
-                "zh": "颗粒/干声比",
-                "ru": "Гран./сухой"
-            },
-            "fontSize": 9
-        },
-        {
-            "componentType": "Input",
-            "id": "112",
-            "x": 133,
-            "y": 431,
-            "jackType": "control",
-            "bandwidth": "static",
-            "ConnectorName": "Grain/dry mix CV",
-            "connectorNameI18n": {
-                "en": "Grain/dry mix CV",
-                "zh": "颗粒/干声比 调制输入",
-                "ru": "Модуляция: Гран./сухой"
+                "ru": "Модуляция: Фикс. фазы"
             }
         },
         {
             "componentType": "Knob",
             "id": "12",
-            "x": 176,
-            "y": 337,
+            "x": 416,
+            "y": 221,
             "size": "medium",
-            "min": 0,
-            "max": 127,
-            "defaultValue": 90,
+            "min": -24,
+            "max": 12,
+            "defaultValue": -12,
+            "snapping": true,
             "csoundName": "Level"
         },
         {
             "componentType": "TextLabel",
             "id": "311",
-            "x": 176,
-            "y": 323,
-            "text": "Output level",
+            "x": 416,
+            "y": 208,
+            "text": "Output dB",
             "textI18n": {
-                "en": "Output level",
-                "zh": "输出电平",
-                "ru": "Уровень"
+                "en": "Output dB",
+                "zh": "输出电平 dB",
+                "ru": "Уровень, дБ"
             },
-            "fontSize": 9
+            "fontSize": 10
         },
         {
             "componentType": "Input",
             "id": "113",
-            "x": 215,
-            "y": 340,
+            "x": 471,
+            "y": 224,
             "jackType": "control",
             "bandwidth": "static",
-            "ConnectorName": "Output level CV",
+            "ConnectorName": "Output dB CV",
             "connectorNameI18n": {
-                "en": "Output level CV",
-                "zh": "输出电平 调制输入",
-                "ru": "Модуляция: Уровень"
+                "en": "Output dB CV",
+                "zh": "输出电平 dB 调制输入",
+                "ru": "Модуляция: Уровень, дБ"
             }
         },
         {
             "componentType": "Knob",
             "id": "13",
-            "x": 176,
-            "y": 245,
+            "x": 416,
+            "y": 149,
             "size": "medium",
             "min": 0,
             "max": 65534,
@@ -611,21 +564,21 @@ export const GrainOscModule = {
         {
             "componentType": "TextLabel",
             "id": "312",
-            "x": 176,
-            "y": 231,
-            "text": "Random seed",
+            "x": 416,
+            "y": 136,
+            "text": "Seed",
             "textI18n": {
-                "en": "Random seed",
+                "en": "Seed",
                 "zh": "随机种子",
-                "ru": "Случ. зерно"
+                "ru": "Зерно"
             },
-            "fontSize": 9
+            "fontSize": 10
         },
         {
             "componentType": "Knob",
             "id": "14",
-            "x": 12,
-            "y": 100,
+            "x": 18,
+            "y": 133,
             "size": "medium",
             "min": 0,
             "max": 3,
@@ -635,48 +588,125 @@ export const GrainOscModule = {
         {
             "componentType": "TextLabel",
             "id": "313",
-            "x": 12,
-            "y": 86,
-            "text": "Waveform",
+            "x": 18,
+            "y": 120,
+            "text": "Wave",
             "textI18n": {
-                "en": "Waveform",
+                "en": "Wave",
                 "zh": "波形",
-                "ru": "Форма волны"
+                "ru": "Волна"
             },
-            "fontSize": 9
+            "fontSize": 10
         },
         {
-            "componentType": "Input",
-            "id": "101",
-            "x": 18,
-            "y": 499,
-            "jackType": "audio",
-            "bandwidth": "static",
-            "ConnectorName": "Dry in (optional)",
-            "connectorNameI18n": {
-                "en": "Dry in (optional)",
-                "zh": "干声输入（可选）",
-                "ru": "Сухой (необяз.)"
-            }
+            "componentType": "Knob",
+            "id": "15",
+            "x": 170,
+            "y": 229,
+            "size": "medium",
+            "min": 0,
+            "max": 100,
+            "defaultValue": 0,
+            "csoundName": "TimeJitter"
         },
         {
             "componentType": "TextLabel",
-            "id": "601",
-            "x": 15,
-            "y": 480,
-            "text": "Dry in (optional)",
+            "id": "314",
+            "x": 170,
+            "y": 216,
+            "text": "Time jitter %",
             "textI18n": {
-                "en": "Dry in (optional)",
-                "zh": "干声输入（可选）",
-                "ru": "Сухой (необяз.)"
+                "en": "Time jitter %",
+                "zh": "时间散布 %",
+                "ru": "Разбр. вр."
+            },
+            "fontSize": 10
+        },
+        {
+            "componentType": "Input",
+            "id": "115",
+            "x": 225,
+            "y": 232,
+            "jackType": "control",
+            "bandwidth": "static",
+            "ConnectorName": "Time jitter % CV",
+            "connectorNameI18n": {
+                "en": "Time jitter % CV",
+                "zh": "时间散布 % 调制输入",
+                "ru": "Модуляция: Разбр. вр."
+            }
+        },
+        {
+            "componentType": "ButtonIncDec",
+            "id": "16",
+            "x": 94,
+            "y": 233,
+            "width": 58,
+            "items": "Forward,Reverse",
+            "itemsI18n": {
+                "en": "Forward,Reverse",
+                "zh": "正向,反向",
+                "ru": "Вперёд,Назад"
+            },
+            "initialIndex": 0,
+            "binaryThreshold": true,
+            "csoundName": "Reverse"
+        },
+        {
+            "componentType": "TextLabel",
+            "id": "315",
+            "x": 94,
+            "y": 216,
+            "text": "Direction",
+            "textI18n": {
+                "en": "Direction",
+                "zh": "播放方向",
+                "ru": "Направл."
+            },
+            "fontSize": 10
+        },
+        {
+            "componentType": "Input",
+            "id": "116",
+            "x": 155,
+            "y": 232,
+            "jackType": "control",
+            "bandwidth": "static",
+            "ConnectorName": "Direction CV",
+            "connectorNameI18n": {
+                "en": "Direction CV",
+                "zh": "播放方向 调制输入",
+                "ru": "Модуляция: Направл."
+            }
+        },
+        {
+            "componentType": "Line",
+            "id": "926",
+            "x": 12,
+            "y": 266,
+            "length": 476,
+            "orientation": "Horizontal",
+            "width": 1,
+            "color": "#1e293b"
+        },
+        {
+            "componentType": "TextLabel",
+            "id": "932",
+            "x": 264,
+            "y": 275,
+            "text": "Grain Stereo Out (L / R) →",
+            "textI18n": {
+                "en": "Grain Stereo Out (L / R) →",
+                "zh": "颗粒立体声输出 (左 / 右) →",
+                "ru": "Стереовыход (Л / П) →"
             },
             "fontSize": 10
         },
         {
             "componentType": "Output",
             "id": "201",
-            "x": 168,
-            "y": 499,
+            "x": 426,
+            "y": 274,
             "jackType": "audio",
             "bandwidth": "static",
             "ConnectorName": "L",
@@ -689,8 +719,8 @@ export const GrainOscModule = {
         {
             "componentType": "TextLabel",
             "id": "701",
-            "x": 165,
-            "y": 480,
+            "x": 412,
+            "y": 275,
             "text": "L",
             "textI18n": {
                 "en": "L",
@@ -702,8 +732,8 @@ export const GrainOscModule = {
         {
             "componentType": "Output",
             "id": "202",
-            "x": 216,
-            "y": 499,
+            "x": 468,
+            "y": 274,
             "jackType": "audio",
             "bandwidth": "static",
             "ConnectorName": "R",
@@ -716,8 +746,8 @@ export const GrainOscModule = {
         {
             "componentType": "TextLabel",
             "id": "702",
-            "x": 213,
-            "y": 480,
+            "x": 454,
+            "y": 275,
             "text": "R",
             "textI18n": {
                 "en": "R",

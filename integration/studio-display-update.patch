@@ -1,0 +1,267 @@
+diff --git a/src/csound/CsoundGenerator.js b/src/csound/CsoundGenerator.js
+index 2406ddd..ebc8904 100644
+--- a/src/csound/CsoundGenerator.js
++++ b/src/csound/CsoundGenerator.js
+@@ -464,7 +464,10 @@ export class CsoundGenerator {
+             if (!panel?.pulvisControls || bus === undefined || this.pulvisScopeTables.has(panel.moduleId)) continue;
+             const tableNum = previous.get(panel.moduleId) ?? this._scopeTableCounter++;
+             this.pulvisScopeTables.set(panel.moduleId, tableNum);
+-            tables.set(panel.moduleId, { tableNum, bus, isAudio: true, panel });
++            const spectrumKey = panel.moduleId + ':spectrum';
++            const spectrumTable = previous.get(spectrumKey) ?? this._scopeTableCounter++;
++            this.pulvisScopeTables.set(spectrumKey, spectrumTable);
++            tables.set(panel.moduleId, { tableNum, bus, isAudio: true, panel, spectrumTable });
+         }
+         if (tables.size === 0) {
+             return { ftgens: '; no scope tables', voiceTables: '', fxTables: '' };
+@@ -494,6 +497,14 @@ export class CsoundGenerator {
+                 lines.push(`tablew kScopeSig_${info.tableNum}, k(aScopeIdx_${info.tableNum}), ${info.tableNum}, 1`);
+             }
+ 
++            if (info.spectrumTable) {
++                // 2048-point Hann FFT: one amplitude per bin, including DC and Nyquist.
++                const spectrum = info.spectrumTable;
++                ftgenLines.push(`giSpectrum_${spectrum} ftgen ${spectrum}, 0, -1025, -2, 0`);
++                lines.push(`fSpectrum_${spectrum} pvsanal aScopeSig_${info.tableNum}, 2048, 512, 2048, 1`);
++                lines.push(`kSpectrum_${spectrum} pvsftw fSpectrum_${spectrum}, giSpectrum_${spectrum}`);
++            }
++
+             if (layer === 'fx') fxLines.push(...lines);
+             else voiceLines.push(...lines);
+         }
+diff --git a/src/ui/ModuleContextMenu.js b/src/ui/ModuleContextMenu.js
+index cf72da1..a4cd90f 100644
+--- a/src/ui/ModuleContextMenu.js
++++ b/src/ui/ModuleContextMenu.js
+@@ -48,21 +48,64 @@ export class ModuleContextMenu {
+     return localize(text, this.currentModule?.pulvisControls ? this.currentModule.uiLanguage : undefined);
+   }
+ 
++  showPulvisAbout(definition) {
++    const url = 'https://github.com/NJyutong/csmodular-pulvis';
++    const dialog = document.createElement('dialog');
++    dialog.className = 'pulvis-about-dialog';
++    dialog.lang = definition.uiLanguage;
++    dialog.setAttribute('aria-labelledby', 'pulvis-about-title');
++
++    const icon = document.createElement('img');
++    icon.src = import.meta.env.BASE_URL + 'libraries/pulvis/assets/pulvis-icon.png';
++    icon.alt = '';
++    icon.width = icon.height = 44;
++    const title = document.createElement('h2');
++    title.id = 'pulvis-about-title';
++    title.textContent = this.t({ en: 'About Pulvis', zh: '关于 Pulvis', ru: 'О Pulvis' });
++    const moduleName = document.createElement('p');
++    moduleName.textContent = definition.displayName + ' · v' + definition.pulvisVersion;
++    const links = document.createElement('dl');
++    const addLink = (label, text, href) => {
++      const term = document.createElement('dt');
++      term.textContent = this.t(label);
++      const value = document.createElement('dd');
++      const link = document.createElement('a');
++      link.href = href;
++      link.target = '_blank';
++      link.rel = 'noopener noreferrer';
++      link.textContent = text;
++      value.append(link);
++      links.append(term, value);
++    };
++    addLink({ en: 'Project website', zh: '项目网址', ru: 'Сайт проекта' }, url, url);
++    addLink({ en: 'License', zh: '许可证', ru: 'Лицензия' }, 'MIT', url + '/blob/HEAD/LICENSE');
++    const copyright = document.createElement('small');
++    copyright.textContent = '© 2026 CsModular granular library contributors\n© 2026 Zhang Shengwei';
++    const close = document.createElement('button');
++    close.type = 'button';
++    close.autofocus = true;
++    close.textContent = this.t({ en: 'Close', zh: '关闭', ru: 'Закрыть' });
++    close.onclick = () => dialog.close();
++    dialog.onclick = event => {
++      const rect = dialog.getBoundingClientRect();
++      if (event.target === dialog && (event.clientX < rect.left || event.clientX > rect.right
++          || event.clientY < rect.top || event.clientY > rect.bottom)) dialog.close();
++    };
++    dialog.onkeydown = event => event.stopPropagation();
++    dialog.onclose = () => {
++      dialog.remove();
++      this.system.canvas.focus({ preventScroll: true });
++    };
++    dialog.append(icon, title, moduleName, links, copyright, close);
++    document.body.append(dialog);
++    dialog.showModal();
++  }
++
+   addPulvisSettings() {
+     const definition = this.system.moduleFactory.moduleRegistry[this.currentModule.jsonName];
+-    const about = document.createElement('details');
+-    about.className = 'pulvis-about';
+-    const summary = document.createElement('summary');
+-    summary.textContent = this.t({ en: 'About', zh: '关于', ru: 'О модуле' });
+-    const identity = document.createElement('strong');
+-    identity.textContent = definition.displayName + ' · v' + definition.pulvisVersion;
+-    const description = document.createElement('p');
+-    description.textContent = definition.tooltip;
+-    about.append(summary, identity, description);
+-    about.ontoggle = () => {
+-      if (about.isConnected && about.open && this.currentModule)
+-        positionContextMenu(this.menuElement, this.anchor.x, this.anchor.y);
+-    };
++    const about = this.createMenuItem(this.t({ en: 'About', zh: '关于', ru: 'О модуле' }),
++        () => this.showPulvisAbout(definition));
++    about.setAttribute('aria-haspopup', 'dialog');
+     const label = document.createElement('label');
+     label.className = 'pulvis-language';
+     label.append(this.t({ en: 'Language', zh: '语言', ru: 'Язык' }));
+@@ -73,10 +116,8 @@ export class ModuleContextMenu {
+     ]) select.add(new Option(name, value));
+     select.value = getPulvisPreference();
+     select.onchange = () => {
+-      const wasOpen = about.open;
+       switchPulvisLanguage(this.system, select.value);
+       this.updateMenuContent();
+-      this.menuElement.querySelector('.pulvis-about').open = wasOpen;
+       positionContextMenu(this.menuElement, this.anchor.x, this.anchor.y);
+       this.menuElement.querySelector('.pulvis-language select').focus();
+     };
+diff --git a/src/ui/PulvisPanel.js b/src/ui/PulvisPanel.js
+index d995459..d549b6f 100644
+--- a/src/ui/PulvisPanel.js
++++ b/src/ui/PulvisPanel.js
+@@ -196,6 +196,44 @@ function readPanelVal(panel, id, fallback = 0) {
+     return Number.isFinite(Number(v)) ? Number(v) : fallback;
+ }
+ 
++// Display the magnitude bins produced by Csound on a logarithmic frequency axis.
++function drawSpectrum(ctx, bins, x, y, width, height, palette, label) {
++    const minHz = 40, maxHz = 20000, nyquist = 24000;
++    const xAt = hz => x + Math.log(hz / minHz) / Math.log(maxHz / minHz) * width;
++    const floorY = y + height - 8;
++    ctx.save();
++    ctx.font = '8px ' + MONO_FONT;
++    ctx.textAlign = 'left';
++    ctx.textBaseline = 'bottom';
++    ctx.fillStyle = palette.mutedText;
++    ctx.fillText(label, x, y + 7);
++    for (const [hz, tick] of [[100, '100'], [1000, '1k'], [10000, '10k']]) {
++        const tx = xAt(hz);
++        ctx.strokeStyle = palette.oledGrid;
++        ctx.beginPath();
++        ctx.moveTo(tx, y + 8);
++        ctx.lineTo(tx, floorY);
++        ctx.stroke();
++        ctx.textAlign = 'center';
++        ctx.fillText(tick, tx, y + height + 1);
++    }
++    if (bins?.length > 1) {
++        const count = 36;
++        const binHz = nyquist / (bins.length - 1);
++        ctx.fillStyle = palette.accent;
++        for (let i = 0; i < count; i++) {
++            const first = Math.max(1, Math.round(minHz * (maxHz / minHz) ** (i / count) / binHz));
++            const end = Math.max(first + 1, Math.round(minHz * (maxHz / minHz) ** ((i + 1) / count) / binHz));
++            let peak = 0;
++            for (let bin = first; bin < end; bin++) peak = Math.max(peak, bins[bin]);
++            const level = Math.max(0, Math.min(1, (20 * Math.log10(peak) + 72) / 72));
++            const barHeight = level * (floorY - y - 7);
++            ctx.fillRect(x + i * width / count, floorY - barHeight, width / count - 1, barHeight);
++        }
++    }
++    ctx.restore();
++}
++
+ function drawPulvisStudioChassisAndOled(panel, ctx, palette) {
+     const px = panel.pixelX;
+     const py = panel.pixelY;
+@@ -344,11 +382,15 @@ function drawPulvisStudioChassisAndOled(panel, ctx, palette) {
+             ctx.fillText(label, x + 72, scopeY + 16);
+         });
+     } else {
++        const waveWidth = Math.floor(scopeW / 2);
++        const spectrum = engine.state === 'running' && engine.getScopeBuffer(panel.moduleId + ':spectrum');
++        drawSpectrum(ctx, spectrum, scopeX + waveWidth + 6, scopeY, scopeW - waveWidth - 6, scopeH,
++            palette, tr('Spectrum · Hz', '频谱 · Hz', 'Спектр · Гц'));
+         const buffer = engine.state === 'running' && engine.getScopeBuffer(panel.moduleId);
+         if (buffer?.length) {
+             ctx.beginPath();
+-            for (let i = 0; i < scopeW; i++) {
+-                const amplitude = Math.max(-1, Math.min(1, buffer[i]));
++            for (let i = 0; i < waveWidth; i++) {
++                const amplitude = Math.max(-1, Math.min(1, buffer[i * 2]));
+                 const y = scopeMidY - amplitude * scopeH * 0.46;
+                 if (i === 0) ctx.moveTo(scopeX, y);
+                 else ctx.lineTo(scopeX + i, y);
+@@ -361,7 +403,7 @@ function drawPulvisStudioChassisAndOled(panel, ctx, palette) {
+             const status = engine.state === 'running' ? tr('Connect an audio output', '请连接音频输出', 'Подключите аудиовыход')
+                 : engine.state === 'error' ? tr('Csound error', 'Csound 错误', 'Ошибка Csound')
+                 : tr('Csound stopped', 'Csound 已停止', 'Csound остановлен');
+-            ctx.fillText(status, scopeX, scopeMidY);
++            ctx.fillText(status, scopeX, scopeMidY, waveWidth - 4);
+         }
+     }
+ 
+@@ -474,23 +516,6 @@ function drawTextLabel(ctx) {
+             ctx.restore();
+             return;
+         }
+-        if (idNum === 930 || idNum === 931) {
+-            if (idNum === 930) {
+-                const cardW = panel.jsonName === 'GrainSample' ? 144 : 218;
+-                ctx.fillStyle = 'rgba(7, 11, 20, 0.72)';
+-                fillRoundedPath(ctx, this.x - 4, this.y - 5, cardW, 35, 5);
+-                ctx.strokeStyle = palette.pillBorder;
+-                ctx.lineWidth = 1;
+-                strokeRoundedPath(ctx, this.x - 4, this.y - 5, cardW, 35, 5);
+-            }
+-            ctx.fillStyle = idNum === 930 ? palette.accent : palette.mutedText;
+-            ctx.font = `600 9.5px ${UI_FONT}`;
+-            ctx.textAlign = 'left';
+-            ctx.textBaseline = 'top';
+-            ctx.fillText(this.text, this.x + 2, this.y);
+-            ctx.restore();
+-            return;
+-        }
+         if (idNum === 932 || idNum >= 600) {
+             ctx.fillStyle = idNum >= 600 ? palette.titleText : palette.mutedText;
+             ctx.font = `bold 10px ${UI_FONT}`;
+diff --git a/src/ui/module-menu.css b/src/ui/module-menu.css
+index 5a17c0c..29fcd4e 100644
+--- a/src/ui/module-menu.css
++++ b/src/ui/module-menu.css
+@@ -32,9 +32,34 @@
+ #module-context-menu .module-layers button[aria-pressed=true] { color: #102720; background: #b0dbc7; font-weight: 650; }
+ #module-context-menu .destructive { color: #ffb9ab; }
+ 
+-#module-context-menu .pulvis-about { padding: 7px 9px; }
+-#module-context-menu .pulvis-about summary { cursor: pointer; font-weight: 600; }
+-#module-context-menu .pulvis-about strong { display: block; margin-top: 8px; }
+-#module-context-menu .pulvis-about p { margin: 4px 0; }
+ #module-context-menu .pulvis-language { display: flex; align-items: center; justify-content: space-between; padding: 5px 9px; }
+ #module-context-menu .pulvis-language select { font: inherit; }
++
++.pulvis-about-dialog {
++  position: fixed;
++  inset: 0;
++  margin: auto;
++  width: min(26rem, calc(100vw - 2rem));
++  max-height: calc(100dvh - 2rem);
++  overflow: auto;
++  box-sizing: border-box;
++  padding: 24px;
++  border: 1px solid #526861;
++  border-radius: 12px;
++  background: #192321;
++  color: #f1f6f3;
++  font: 14px/1.45 system-ui, sans-serif;
++  box-shadow: 0 12px 40px #0006;
++  color-scheme: dark;
++}
++.pulvis-about-dialog::backdrop { background: rgb(10 16 16 / 58%); }
++.pulvis-about-dialog img { float: right; border-radius: 8px; }
++.pulvis-about-dialog h2 { margin: 0; font-size: 21px; }
++.pulvis-about-dialog p { margin: 3px 0 16px; color: #bdcbc5; }
++.pulvis-about-dialog dl { clear: both; border-block: 1px solid #42534d; padding: 14px 0; margin: 0 0 14px; }
++.pulvis-about-dialog dt { color: #bdcbc5; font-size: 12px; }
++.pulvis-about-dialog dd { margin: 2px 0 12px; overflow-wrap: anywhere; }
++.pulvis-about-dialog dd:last-child { margin-bottom: 0; }
++.pulvis-about-dialog a { color: #b0e8d4; }
++.pulvis-about-dialog small { display: block; color: #bdcbc5; white-space: pre-line; }
++.pulvis-about-dialog button { display: block; margin: 16px 0 0 auto; border: 0; border-radius: 6px; padding: 6px 16px; color: #12241e; background: #b0dbc7; font: inherit; cursor: pointer; }

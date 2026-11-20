@@ -1,7 +1,11 @@
 {
-  "name": "granular",
-  "displayName": "Granular",
-  "version": "1.1.1",
-  "author": "Zhang Shengwei",
+  "name": "pulvis",
+  "displayName": "Pulvis",
+  "displayNameI18n": {
+    "en": "Pulvis",
+    "zh": "微粒",
+    "ru": "Пульвис"
+  },
+  "version": "0.0.5",
   "description": "Original Csound granular synthesis: live ring, sample table and periodic wave sources."
 }

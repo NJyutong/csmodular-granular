@@ -1,0 +1,95 @@
+{
+  "filename": "pulvis-demo.json",
+  "modules": [
+    {
+      "name": "GrainOsc",
+      "library": "pulvis",
+      "id": 1,
+      "type": 0,
+      "parameters": "[0,24,80,0,0,0,0,0,64,64,0,0,-12,1,0,0,0]",
+      "modes": [],
+      "area": "VOICE",
+      "hpos": 1,
+      "vpos": 2
+    },
+    {
+      "name": "GrainFreeze",
+      "library": "pulvis",
+      "id": 2,
+      "type": 0,
+      "parameters": "[0,12,80,32,8,0,0,0,64,64,0,127,-3,1,0,0,0,0,0]",
+      "modes": [],
+      "area": "VOICE",
+      "hpos": 27,
+      "vpos": 2
+    },
+    {
+      "name": "Outs2",
+      "library": "my-lib",
+      "id": 3,
+      "type": 0,
+      "parameters": "[0,0,0,1]",
+      "modes": [],
+      "area": "VOICE",
+      "hpos": 27,
+      "vpos": 22
+    },
+    {
+      "name": "GrainSample",
+      "library": "pulvis",
+      "id": 4,
+      "type": 0,
+      "parameters": "[0,12,80,32,8,0,0,0,64,64,0,0,-12,1,1,0,0,0]",
+      "modes": [],
+      "area": "VOICE",
+      "hpos": 1,
+      "vpos": 22
+    }
+  ],
+  "cables": [
+    {
+      "from": {
+        "id": 1,
+        "jack": 0,
+        "pin": "out"
+      },
+      "to": {
+        "id": 2,
+        "jack": 0,
+        "pin": "in"
+      },
+      "type": "out-in",
+      "area": "VOICE"
+    },
+    {
+      "from": {
+        "id": 2,
+        "jack": 0,
+        "pin": "out"
+      },
+      "to": {
+        "id": 3,
+        "jack": 0,
+        "pin": "in"
+      },
+      "type": "out-in",
+      "area": "VOICE"
+    },
+    {
+      "from": {
+        "id": 2,
+        "jack": 1,
+        "pin": "out"
+      },
+      "to": {
+        "id": 3,
+        "jack": 1,
+        "pin": "in"
+      },
+      "type": "out-in",
+      "area": "VOICE"
+    }
+  ],
+  "stickers": [],
+  "textpad": "EN: Grain Osc → Grain Freeze → Outs2. Record, Freeze, then Capture and choose Snapshot. Grain Sample stays an independent WAV source.\n中文：Grain Osc → Grain Freeze → Outs2。录入后冻结，再捕捉快照并选择“快照”。Grain Sample 始终是独立 WAV 声源。\nРусский: Grain Osc → Grain Freeze → Outs2. Запишите, остановите, сохраните снимок и выберите «Снимок». Grain Sample остаётся отдельным WAV-источником."
+}

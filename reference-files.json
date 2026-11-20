@@ -2,52 +2,52 @@
   "reviewed": "2026-11-12",
   "files": [
     {
-      "path": "QB_Nebulae_V2-master/Instruments/Granular Looper/a_granular_looper.instr",
+      "path": "E:/paper/QB_Nebulae_V2-master/Instruments/Granular Looper/a_granular_looper.instr",
       "sha256": "6f7112060eb13f67e4ca20ac70572b7f4cce8928dc6831c04616fe77a0712c0c",
       "bytes": 32116
     },
     {
-      "path": "eurorack-master/clouds/dsp/granular_processor.cc",
+      "path": "E:/paper/eurorack-master/clouds/dsp/granular_processor.cc",
       "sha256": "b269442f850c344b4598424c7ccc3750f1ca090979d975af3af6e2e96ecd8d88",
       "bytes": 15864
     },
     {
-      "path": "eurorack-master/clouds/dsp/granular_sample_player.h",
+      "path": "E:/paper/eurorack-master/clouds/dsp/granular_sample_player.h",
       "sha256": "1cabcbe9d39b5d9eeeaf31d9c71783d9349bf63f0ec9e92167ee181ccd22a406",
       "bytes": 8448
     },
     {
-      "path": "eurorack-master/clouds/dsp/grain.h",
+      "path": "E:/paper/eurorack-master/clouds/dsp/grain.h",
       "sha256": "08feb5ac5408e2cb30eb037a844f6ee187d8dedd53fee913d1b5ab2c74ebfac3",
       "bytes": 5861
     },
     {
-      "path": "eurorack-master/clouds/dsp/audio_buffer.h",
+      "path": "E:/paper/eurorack-master/clouds/dsp/audio_buffer.h",
       "sha256": "110c63276ec84cbb211f98a5897d075307471da25ae1845da82dac504d052657",
       "bytes": 8891
     },
     {
-      "path": "csound-floss-develop/book/04-f-granular-synthesis.md",
+      "path": "E:/paper/csound-floss-develop/book/04-f-granular-synthesis.md",
       "sha256": "117d517a3f32c286407439467dcc171e0b5c7339db38ee6f5e8da65e3470bb95",
       "bytes": 22735
     },
     {
-      "path": "csound-floss-develop/book/05-g-granular-synthesis.md",
+      "path": "E:/paper/csound-floss-develop/book/05-g-granular-synthesis.md",
       "sha256": "13fa32c8756f2492afb3a02215bc630c616ffc6cb43d0b8c907d19ee88c07e3c",
       "bytes": 53131
     },
     {
-      "path": "csound-floss-develop/book/14-g-credits.md",
+      "path": "E:/paper/csound-floss-develop/book/14-g-credits.md",
       "sha256": "bcf58d11948ac052544d969529b453c45ce0505569c8e568d55b893eb35d7892",
       "bytes": 5486
     },
     {
-      "path": "BHarvestr-master/src/Grain.hpp",
+      "path": "E:/paper/BHarvestr-master/src/Grain.hpp",
       "sha256": "a4d17d28addc385ae3973baa2cc77e66ee1f87c667a9277f8d539141c58ca635",
       "bytes": 1065
     },
     {
-      "path": "BHarvestr-master/src/Voice.hpp",
+      "path": "E:/paper/BHarvestr-master/src/Voice.hpp",
       "sha256": "7c2d8ccec406f7cb093f9240b7ed7879e5911c2002181eac1681c1131151045a",
       "bytes": 1825
     }

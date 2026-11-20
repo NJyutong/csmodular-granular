@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light">
+    <title>Pulvis Installer</title>
+    <link rel="stylesheet" href="style.css">
+    <script type="module" src="app.js"></script>
+  </head>
+  <body>
+    <main class="installer">
+      <header class="topbar">
+        <div class="brand">
+          <img class="mark" src="pulvis-icon.png" alt="" aria-hidden="true">
+          <div class="brand-copy">
+            <span class="eyebrow" data-i18n="eyebrow">PLUGIN INSTALLER</span>
+            <h1 data-i18n="title">CsModular Pulvis</h1>
+          </div>
+        </div>
+        <div class="header-tools">
+          <nav class="language" id="language" aria-label="Language">
+            <button type="button" data-language="zh" aria-pressed="false">中</button>
+            <button type="button" data-language="en" aria-pressed="true">EN</button>
+            <button type="button" data-language="ru" aria-pressed="false">RU</button>
+          </nav>
+          <span class="version"></span>
+        </div>
+      </header>
+
+      <section class="intro">
+        <div class="intro-header">
+          <h2 data-i18n="heading">Install Pulvis</h2>
+          <span class="engine-pill" data-i18n="engineBadge">64-Voice Csound Granular Engine</span>
+        </div>
+        <p data-i18n="description">Install the granular synthesis library for CsModular.</p>
+        <div class="module-grid" aria-label="Included modules">
+          <div class="module-card" data-category="fx">
+            <div class="module-card-head">
+              <span class="module-dot" aria-hidden="true"></span>
+              <strong data-i18n="modFreezeTitle">Grain Freeze</strong>
+              <span class="module-tag">FX</span>
+            </div>
+            <span class="module-desc" data-i18n="modFreezeDesc">8s live ring, snapshot memory &amp; feedback</span>
+          </div>
+          <div class="module-card" data-category="sample">
+            <div class="module-card-head">
+              <span class="module-dot" aria-hidden="true"></span>
+              <strong data-i18n="modSampleTitle">Grain Sample</strong>
+              <span class="module-tag">WAV</span>
+            </div>
+            <span class="module-desc" data-i18n="modSampleDesc">8 session WAV slots, scan &amp; band-limited sinc</span>
+          </div>
+          <div class="module-card" data-category="osc">
+            <div class="module-card-head">
+              <span class="module-dot" aria-hidden="true"></span>
+              <strong data-i18n="modOscTitle">Grain Osc</strong>
+              <span class="module-tag">OSC</span>
+            </div>
+            <span class="module-desc" data-i18n="modOscDesc">4 carrier waves, phase warp &amp; timing scatter</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="install-location" aria-labelledby="location-label">
+        <div class="section-heading">
+          <span id="location-label" data-i18n="locationLabel">Install location</span>
+          <span class="section-detail" data-i18n="locationDetail">CsModular module library</span>
+        </div>
+        <div class="destination">
+          <span class="folder-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M3.75 6.75a1.5 1.5 0 0 1 1.5-1.5h4.1l1.8 2h7.6a1.5 1.5 0 0 1 1.5 1.5v8.5a1.5 1.5 0 0 1-1.5 1.5H5.25a1.5 1.5 0 0 1-1.5-1.5v-10.5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M3.9 9h16.2" stroke="currentColor" stroke-width="1.6"/></svg>
+          </span>
+          <div class="destination-copy">
+            <code id="destination" data-i18n="selectFolder">Looking for CsModular…</code>
+          </div>
+          <button id="choose" class="browse" type="button" data-i18n="choose">Browse</button>
+        </div>
+      </section>
+
+      <div class="status-line">
+        <span class="status-dot" aria-hidden="true"></span>
+        <div id="status" class="status" role="status" aria-live="polite" data-i18n="detectingHost">Looking for CsModular…</div>
+      </div>
+
+      <div class="actions">
+        <button id="uninstall" class="secondary" type="button" data-i18n="uninstall" disabled>Uninstall</button>
+        <button id="install" class="primary" type="button" data-i18n="install" disabled>Install</button>
+      </div>
+
+      <div class="notes-block">
+        <p class="note" data-i18n="note">Close CsModular before installing or updating. Restart it when installation is complete.</p>
+        <p class="compat-note" data-i18n="compatibility">Requires CsModular with Pulvis library integration and WAV import support.</p>
+      </div>
+
+      <footer>
+        <span data-i18n="copyright">Copyright © 2026 Zhang Shengwei</span>
+        <span data-i18n="license">MIT License</span>
+      </footer>
+    </main>
+  </body>
+</html>
