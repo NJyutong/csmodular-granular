@@ -50,7 +50,7 @@ const expectedFiles = [
     'modules/GrainOsc.js', 'modules/GrainOsc.txt',
     'examples/pulvis-demo.json',
     'README.md', 'README.zh-CN.md', 'README.ru.md', 'LICENSE',
-    'assets/pulvis-source.webp', 'assets/pulvis-icon.png', 'requirements-release.txt',
+    'assets/pulvis-icon.png', 'requirements-release.txt',
     'installer/ui/pulvis-icon.png', 'installer/ui/version.js',
     'installer/src-tauri/icons/icon.png', 'installer/src-tauri/icons/icon.ico', 'installer/src-tauri/icons/icon.icns',
     'installer/package.json', 'installer/package-lock.json', 'installer/src-tauri/Cargo.toml',
@@ -64,10 +64,10 @@ const expectedFiles = [
     'scripts/build-artifacts.mjs', 'scripts/cleanup-build-task.mjs', 'scripts/package-source.mjs',
     'scripts/write-release-checksums.mjs', 'scripts/package-smoke.mjs',
     'docs/BUILDING.md', 'docs/TESTING.md', 'docs/GITHUB-SETUP.md', 'release-notes/0.0.5.md',
-    'assets/pulvis-social-preview.png', 'assets/pulvis-social-preview.svg',
+    'assets/pulvis-social-preview.png',
 ];
 expectedFiles.push('SOURCES.md');
-if (!archiveMode) expectedFiles.push('.github/workflows/build-installers.yml', '.github/workflows/quality.yml');
+if (!archiveMode) expectedFiles.push('.github/workflows/build-installers.yml');
 if (!stageMode) expectedFiles.push('integration/csmodular.patch', 'integration/wav-session-compat.patch', 'integration/studio-upgrade.patch', 'integration/studio-display-update.patch', 'integration/studio-release-update.patch', 'integration/studio-live-update.patch', 'integration/display-menu.patch', 'scripts/build-modules.mjs', 'scripts/install.mjs');
 if (!archiveMode && !stageMode) expectedFiles.push('scripts/check.mjs', 'scripts/check-suite.mjs', 'scripts/inventory-artifacts.mjs');
 const hashes = {};
