@@ -1,0 +1,353 @@
+name: Build and verify Pulvis packages
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - 0.0.x
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  windows-x64:
+    name: Windows x64 installer
+    runs-on: windows-latest
+    env:
+      PULVIS_TASK_KIND: desktop
+      PULVIS_TASK_LABEL: windows-x64
+      PULVIS_TASK_ROOT: ${{ runner.temp }}/pulvis-desktop-${{ github.run_id }}-${{ github.run_attempt }}-windows-x64
+      PULVIS_BUILD_LOG_FILE: ${{ runner.temp }}/pulvis-desktop-${{ github.run_id }}-${{ github.run_attempt }}-windows-x64/logs/build.log
+      PULVIS_KEEP_BUILD_TEMP: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Verify release inputs
+        run: |
+          node scripts/sync-version.mjs
+          node scripts/build-modules.mjs
+          node scripts/verify-icons.mjs
+          node scripts/package-smoke.mjs
+
+      - name: Install Inno Setup 7.1.1
+        shell: pwsh
+        run: |
+          $installer = Join-Path $env:RUNNER_TEMP 'innosetup-7.1.1-x64.exe'
+          Invoke-WebRequest -Uri 'https://files.jrsoftware.org/is/7/innosetup-7.1.1-x64.exe' -OutFile $installer
+          $signature = Get-AuthenticodeSignature -LiteralPath $installer
+          if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notlike '*Pyrsys B.V.*') {
+            throw 'The Inno Setup compiler signature is invalid.'
+          }
+          $installDir = Join-Path $env:RUNNER_TEMP 'InnoSetup7'
+          Start-Process -FilePath $installer -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=$installDir") -Wait
+          if (-not (Test-Path -LiteralPath (Join-Path $installDir 'ISCC.exe'))) {
+            throw 'Inno Setup 7.1.1 compiler was not installed.'
+          }
+          "INNO_SETUP_HOME=$installDir" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Build, verify and stage Windows x64 installer plus SHA-256
+        shell: pwsh
+        run: node scripts/build-windows-installer.mjs --arch=x64 (Join-Path $env:PULVIS_TASK_ROOT 'artifacts')
+
+      - name: Upload verified Windows x64 installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: pulvis-windows-x64-v0.0.5
+          path: ${{ runner.temp }}/pulvis-desktop-${{ github.run_id }}-${{ github.run_attempt }}-windows-x64/artifacts/*
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload Windows x64 build diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pulvis-windows-x64-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pulvis-desktop-${{ github.run_id }}-${{ github.run_attempt }}-windows-x64/logs/*.log
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Remove this Windows x64 build task directory
+        if: always()
+        shell: pwsh
+        run: node scripts/cleanup-build-task.mjs $env:PULVIS_TASK_ROOT $env:RUNNER_TEMP desktop $env:GITHUB_RUN_ID $env:GITHUB_RUN_ATTEMPT windows-x64
+
+  windows-arm64:
+    name: Windows ARM64 installer
+    runs-on: windows-latest
+    env:
+      PULVIS_TASK_KIND: desktop
+      PULVIS_TASK_LABEL: windows-arm64
+      PULVIS_TASK_ROOT: ${{ runner.temp }}/pulvis-desktop-${{ github.run_id }}-${{ github.run_attempt }}-windows-arm64
+      PULVIS_BUILD_LOG_FILE: ${{ runner.temp }}/pulvis-desktop-${{ github.run_id }}-${{ github.run_attempt }}-windows-arm64/logs/build.log
+      PULVIS_KEEP_BUILD_TEMP: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Verify release inputs
+        run: |
+          node scripts/sync-version.mjs
+          node scripts/build-modules.mjs
+          node scripts/verify-icons.mjs
+          node scripts/package-smoke.mjs
+
+      - name: Install Inno Setup 7.1.1
+        shell: pwsh
+        run: |
+          $installer = Join-Path $env:RUNNER_TEMP 'innosetup-7.1.1-x64.exe'
+          Invoke-WebRequest -Uri 'https://files.jrsoftware.org/is/7/innosetup-7.1.1-x64.exe' -OutFile $installer
+          $signature = Get-AuthenticodeSignature -LiteralPath $installer
+          if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notlike '*Pyrsys B.V.*') {
+            throw 'The Inno Setup compiler signature is invalid.'
+          }
+          $installDir = Join-Path $env:RUNNER_TEMP 'InnoSetup7'
+          Start-Process -FilePath $installer -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=$installDir") -Wait
+          if (-not (Test-Path -LiteralPath (Join-Path $installDir 'ISCC.exe'))) {
+            throw 'Inno Setup 7.1.1 compiler was not installed.'
+          }
+          "INNO_SETUP_HOME=$installDir" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Build, verify and stage Windows ARM64 installer plus SHA-256
+        shell: pwsh
+        run: node scripts/build-windows-installer.mjs --arch=arm64 (Join-Path $env:PULVIS_TASK_ROOT 'artifacts')
+
+      - name: Upload verified Windows ARM64 installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: pulvis-windows-arm64-v0.0.5
+          path: ${{ runner.temp }}/pulvis-desktop-${{ github.run_id }}-${{ github.run_attempt }}-windows-arm64/artifacts/*
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload Windows ARM64 build diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pulvis-windows-arm64-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pulvis-desktop-${{ github.run_id }}-${{ github.run_attempt }}-windows-arm64/logs/*.log
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Remove this Windows ARM64 build task directory
+        if: always()
+        shell: pwsh
+        run: node scripts/cleanup-build-task.mjs $env:PULVIS_TASK_ROOT $env:RUNNER_TEMP desktop $env:GITHUB_RUN_ID $env:GITHUB_RUN_ATTEMPT windows-arm64
+
+  macos-arm64:
+    name: macOS Apple Silicon (arm64) PKG
+    runs-on: macos-14
+    env:
+      PULVIS_TASK_KIND: desktop
+      PULVIS_TASK_LABEL: macos-arm64
+      PULVIS_TASK_ROOT: ${{ runner.temp }}/pulvis-desktop-${{ github.run_id }}-${{ github.run_attempt }}-macos-arm64
+      PULVIS_BUILD_LOG_FILE: ${{ runner.temp }}/pulvis-desktop-${{ github.run_id }}-${{ github.run_attempt }}-macos-arm64/logs/build.log
+      PULVIS_KEEP_BUILD_TEMP: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Verify release inputs
+        run: |
+          node scripts/sync-version.mjs
+          node scripts/build-modules.mjs
+          node scripts/verify-icons.mjs
+          node scripts/package-smoke.mjs
+
+      - name: Build, verify and stage macOS Apple Silicon PKG plus SHA-256
+        run: node scripts/build-macos-pkg.mjs --arch=arm64 "$RUNNER_TEMP/pulvis-desktop-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-macos-arm64/artifacts"
+
+      - name: Upload verified macOS Apple Silicon package
+        uses: actions/upload-artifact@v4
+        with:
+          name: pulvis-macos-arm64-v0.0.5
+          path: ${{ runner.temp }}/pulvis-desktop-${{ github.run_id }}-${{ github.run_attempt }}-macos-arm64/artifacts/*
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload macOS Apple Silicon build diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pulvis-macos-arm64-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pulvis-desktop-${{ github.run_id }}-${{ github.run_attempt }}-macos-arm64/logs/*.log
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Remove this macOS Apple Silicon build task directory
+        if: always()
+        run: node scripts/cleanup-build-task.mjs "$PULVIS_TASK_ROOT" "$RUNNER_TEMP" desktop "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" macos-arm64
+
+  macos-x64:
+    name: macOS Intel (x64) PKG
+    runs-on: macos-14
+    env:
+      PULVIS_TASK_KIND: desktop
+      PULVIS_TASK_LABEL: macos-x64
+      PULVIS_TASK_ROOT: ${{ runner.temp }}/pulvis-desktop-${{ github.run_id }}-${{ github.run_attempt }}-macos-x64
+      PULVIS_BUILD_LOG_FILE: ${{ runner.temp }}/pulvis-desktop-${{ github.run_id }}-${{ github.run_attempt }}-macos-x64/logs/build.log
+      PULVIS_KEEP_BUILD_TEMP: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Verify release inputs
+        run: |
+          node scripts/sync-version.mjs
+          node scripts/build-modules.mjs
+          node scripts/verify-icons.mjs
+          node scripts/package-smoke.mjs
+
+      - name: Build, verify and stage macOS Intel PKG plus SHA-256
+        run: node scripts/build-macos-pkg.mjs --arch=x64 "$RUNNER_TEMP/pulvis-desktop-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-macos-x64/artifacts"
+
+      - name: Upload verified macOS Intel package
+        uses: actions/upload-artifact@v4
+        with:
+          name: pulvis-macos-x64-v0.0.5
+          path: ${{ runner.temp }}/pulvis-desktop-${{ github.run_id }}-${{ github.run_attempt }}-macos-x64/artifacts/*
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload macOS Intel build diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pulvis-macos-x64-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pulvis-desktop-${{ github.run_id }}-${{ github.run_attempt }}-macos-x64/logs/*.log
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Remove this macOS Intel build task directory
+        if: always()
+        run: node scripts/cleanup-build-task.mjs "$PULVIS_TASK_ROOT" "$RUNNER_TEMP" desktop "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" macos-x64
+
+  linux:
+    name: Linux amd64 Debian package
+    runs-on: ubuntu-22.04
+    env:
+      PULVIS_TASK_KIND: desktop
+      PULVIS_TASK_LABEL: linux-x64
+      PULVIS_TASK_ROOT: ${{ runner.temp }}/pulvis-desktop-${{ github.run_id }}-${{ github.run_attempt }}-linux-x64
+      PULVIS_BUILD_LOG_FILE: ${{ runner.temp }}/pulvis-desktop-${{ github.run_id }}-${{ github.run_attempt }}-linux-x64/logs/build.log
+      PULVIS_KEEP_BUILD_TEMP: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Verify release inputs
+        run: |
+          node scripts/sync-version.mjs
+          node scripts/build-modules.mjs
+          node scripts/verify-icons.mjs
+          node scripts/package-smoke.mjs
+
+      - name: Build, verify and stage Debian package plus SHA-256
+        run: node scripts/build-linux-deb.mjs "$RUNNER_TEMP/pulvis-desktop-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-linux-x64/artifacts"
+
+      - name: Upload verified Linux package
+        uses: actions/upload-artifact@v4
+        with:
+          name: pulvis-linux-x64-v0.0.5
+          path: ${{ runner.temp }}/pulvis-desktop-${{ github.run_id }}-${{ github.run_attempt }}-linux-x64/artifacts/*
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload Linux build diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pulvis-linux-x64-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pulvis-desktop-${{ github.run_id }}-${{ github.run_attempt }}-linux-x64/logs/*.log
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Remove this Linux build task directory
+        if: always()
+        run: node scripts/cleanup-build-task.mjs "$PULVIS_TASK_ROOT" "$RUNNER_TEMP" desktop "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" linux-x64
+
+  source:
+    name: Source archive
+    runs-on: ubuntu-22.04
+    env:
+      PULVIS_TASK_KIND: source
+      PULVIS_TASK_LABEL: archive
+      PULVIS_TASK_ROOT: ${{ runner.temp }}/pulvis-source-${{ github.run_id }}-${{ github.run_attempt }}-archive
+      PULVIS_BUILD_LOG_FILE: ${{ runner.temp }}/pulvis-source-${{ github.run_id }}-${{ github.run_attempt }}-archive/logs/build.log
+      PULVIS_KEEP_BUILD_TEMP: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Package committed source and verify SHA-256
+        run: node scripts/package-source.mjs "$GITHUB_SHA" "$PULVIS_TASK_ROOT/artifacts"
+
+      - name: Upload verified source archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: pulvis-source-v0.0.5
+          path: ${{ runner.temp }}/pulvis-source-${{ github.run_id }}-${{ github.run_attempt }}-archive/artifacts/*
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload source build diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pulvis-source-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pulvis-source-${{ github.run_id }}-${{ github.run_attempt }}-archive/logs/*.log
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Remove this source build task directory
+        if: always()
+        run: node scripts/cleanup-build-task.mjs "$PULVIS_TASK_ROOT" "$RUNNER_TEMP" source "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" archive
+
+  release-bundle:
+    name: Assemble SHA256SUMS and release bundle
+    needs: [windows-x64, windows-arm64, macos-arm64, macos-x64, linux, source]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Download all verified packages
+        uses: actions/download-artifact@v4
+        with:
+          path: ${{ runner.temp }}/pulvis-release-v0.0.5
+          merge-multiple: true
+
+      - name: Generate and verify SHA256SUMS.txt
+        run: node scripts/write-release-checksums.mjs "$RUNNER_TEMP/pulvis-release-v0.0.5"
+
+      - name: Upload complete release bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: pulvis-release-v0.0.5
+          path: ${{ runner.temp }}/pulvis-release-v0.0.5/*
+          if-no-files-found: error
+          retention-days: 30
