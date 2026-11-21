@@ -10,7 +10,7 @@ $moduleIndex = Join-Path $PluginDir '_index.json'
 $marker = Join-Path $PluginDir '_pulvis-library-registration-before-install'
 $inventory = Join-Path $PluginDir '_pulvis-installed-sha256.json'
 $moduleIds = @('GrainFreeze','GrainSample','GrainOsc')
-$owned = @('_meta.json','README.md','README.zh-CN.md','README.ru.md','LICENSE','assets/pulvis-icon.png','examples/pulvis-demo.json')
+$owned = @('_meta.json','README.md','README.zh-CN.md','README.ru.md','LICENSE','assets/pulvis-icon.png','assets/pulvis-social-preview.png','assets/pulvis-header-zh-CN.png','assets/pulvis-header-ru.png','examples/pulvis-demo.json')
 foreach ($id in $moduleIds) { $owned += @("modules/$id.js", "modules/$id.txt") }
 function Read-Index($Path, $Property) {
     $obj = ConvertFrom-Json -InputObject ([IO.File]::ReadAllText($Path))

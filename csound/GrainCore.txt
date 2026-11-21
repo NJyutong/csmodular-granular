@@ -7,8 +7,25 @@
 ; Grain starts stay sample-accurate: a grain born at offset j of a block has age -j,
 ; and its envelope is clamped so every sample before its start or after its end is silent.
 ; mode: 0 = sample, 1 = live ring, 2 = periodic waveform (220 Hz root).
-opcode CMGrainCoreExtended, aa, aikkkkkkkkkkkkkkkkkkkkk
-    aInput, iMode, kTable, kFrames, kSourceRate, kDensity, kSizeMs, kPosition, kPosJitter, kPitch, kPitchJitter, kWindow, kPan, kSpread, kFreeze, kSeed, kTimeJitter, kReverse, kFeedback, kSnapshotSelect, kSnapshotA, kSnapshotB, kCapture xin
+opcode CMPulvisOutputView, 0, ai
+    aSignal, iDisplay xin
+    iScope = iDisplay + 1
+    iSpectrum = iDisplay + 2
+    aPhase phasor sr / 4096
+    tablew aSignal, aPhase * 4096, iScope
+    kHead downsamp aPhase
+    tablew (round(kHead * 4096) + ksmps) % 4096, 4096, iScope
+    fOutput pvsanal aSignal, 2048, 512, 2048, 1
+    kNewSpectrum pvsftw fOutput, iSpectrum
+endop
+
+; Both signal-rate voices and the display evaluate the same window definition.
+#define CM_HANN(P) # (0.5 - 0.5 * cos(6.283185307179586 * $P)) #
+#define CM_TRIANGLE(P) # (1 - abs(2 * $P - 1)) #
+#define CM_BLACKMAN(P) # (0.42 - 0.5 * cos(6.283185307179586 * $P) + 0.08 * cos(12.566370614359172 * $P)) #
+
+opcode CMGrainCoreExtended, aa, aikkkkkkkkkkkkkkkkkkkkko
+    aInput, iMode, kTable, kFrames, kSourceRate, kDensity, kSizeMs, kPosition, kPosJitter, kPitch, kPitchJitter, kWindow, kPan, kSpread, kFreeze, kSeed, kTimeJitter, kReverse, kFeedback, kSnapshotSelect, kSnapshotA, kSnapshotB, kCapture, iDisplay xin
     iBlock = ksmps
     ; Exact 0..ksmps-1 sample offsets of the current block.
     iRampTable ftgentmp 0, 0, -iBlock, -2, 0
@@ -58,6 +75,10 @@ opcode CMGrainCoreExtended, aa, aikkkkkkkkkkkkkkkkkkkkk
     kNextTrigger init -1
     kPreviousTimeOffset init 0
     kCarrier init 0
+    ; Display-only peak history in physical ring order. Capture it alongside the audio.
+    kRingPeak[] init 192
+    kCapturedPeak[] init 192
+    kLastPeakBin init -1
     kWrite init 0
     kFilled init 0
     kRandom init 1
@@ -113,6 +134,15 @@ opcode CMGrainCoreExtended, aa, aikkkkkkkkkkkkkkkkkkkkk
             aRecord = aInput
         endif
         tablewkt aRecord, aWriteIndex, kTable, 0, 0, 1
+        if iDisplay > 0 then
+            kBin = int(kWrite * 192 / kFrames)
+            kPeak max_k aRecord, 1, 1
+            if kBin != kLastPeakBin then
+                kRingPeak[kBin] = 0
+                kLastPeakBin = kBin
+            endif
+            kRingPeak[kBin] = max(kRingPeak[kBin], kPeak)
+        endif
     endif
 
     ; Capture to the inactive private table. Do not overwrite a table still read by
@@ -132,6 +162,9 @@ opcode CMGrainCoreExtended, aa, aikkkkkkkkkkkkkkkkkkkkk
         od
         if kDestinationBusy == 0 && kDestination >= 1 then
             tablecopy kDestination, kTable
+            if iDisplay > 0 then
+                kCapturedPeak = kRingPeak
+            endif
             kSnapshotActive = (kDestination == kSnapshotA ? 1 : 2)
             if kFreeze < 0.5 then
                 kSnapshotWrite = (kWrite + iBlock) % kFrames
@@ -394,11 +427,11 @@ opcode CMGrainCoreExtended, aa, aikkkkkkkkkkkkkkkkkkkkk
         ; Phase is clamped, so samples before the start or after the end are silent.
         aPhase limit (aRamp + kAgeNow) / kSpanNow, 0, 1
         if kShapeNow == 0 then
-            aEnvelope = 0.5 - 0.5 * cos(6.283185307179586 * aPhase)
+            aEnvelope = $CM_HANN(aPhase)
         elseif kShapeNow == 1 then
-            aEnvelope = 1 - abs(2 * aPhase - 1)
+            aEnvelope = $CM_TRIANGLE(aPhase)
         else
-            aEnvelope = 0.42 - 0.5 * cos(6.283185307179586 * aPhase) + 0.08 * cos(12.566370614359172 * aPhase)
+            aEnvelope = $CM_BLACKMAN(aPhase)
         endif
         ; Pitch-down/equal-rate playback uses cubic interpolation. Pitch-up uses
         ; Csound's sinc table reader with a cutoff warped to the playback step;
@@ -475,6 +508,115 @@ opcode CMGrainCoreExtended, aa, aikkkkkkkkkkkkkkkkkkkkk
     if iMode == 1 && kFreeze < 0.5 then
         kWrite = (kWrite + iBlock) % kFrames
         kFilled = min(kFilled + iBlock, kFrames)
+    endif
+
+    ; Dashboard frame: header 0..15, source overview 16..207, then 64
+    ; triples (source position, window progress, current amplitude). A negative position
+    ; identifies a voice still playing a different source after a bank change.
+    if iDisplay > 0 then
+        ; Scan the loaded GEN01 table incrementally. Bound work per audio block,
+        ; including on long files. Only completed pixels are published.
+        kSampleSource init -1
+        kScanFrame init 0
+        kOverviewBins init 0
+        kMinimum init 0
+        kMaximum init 0
+        if iMode == 0 then
+            if kSampleSource != kTable then
+                kSampleSource = kTable
+                kScanFrame = 0
+                kOverviewBins = 0
+                kMinimum = 0
+                kMaximum = 0
+            endif
+            kEnd = min(kFrames, kScanFrame + 128)
+            while kScanFrame < kEnd do
+                kSampleValue tablekt kScanFrame, kTable
+                kMinimum = min(kMinimum, kSampleValue)
+                kMaximum = max(kMaximum, kSampleValue)
+                kScanFrame += 1
+                while kOverviewBins < 192 && kScanFrame * 192 >= (kOverviewBins + 1) * kFrames do
+                    tablewkt kMaximum, 16 + kOverviewBins, iDisplay
+                    tablewkt kMinimum, 465 + kOverviewBins, iDisplay
+                    kOverviewBins += 1
+                    if kScanFrame * 192 < (kOverviewBins + 1) * kFrames then
+                        kMinimum = 0
+                        kMaximum = 0
+                    endif
+                od
+            od
+        endif
+        kFrameTick metro 30
+        if kFrameTick == 1 then
+            kView = iDisplay
+            kHasSource = (iMode == 1 && kSnapshotSelect == 1 && kSnapshotActive == 0 ? 0 : 1)
+            kWriter = (kSnapshotSelect == 1 ? kSnapshotWrite : kWrite) / kFrames
+            kRecorded = (kSnapshotSelect == 1 ? kSnapshotFilled : kFilled) / kFrames
+            tablewkt 1, 0, kView
+            tablewkt kCount, 1, kView
+            tablewkt kHeldPosition, 2, kView
+            tablewkt kPosJitter, 3, kView
+            tablewkt kWriter, 4, kView
+            tablewkt kRecorded, 5, kView
+            tablewkt kHasSource, 6, kView
+            tablewkt int(limit(kWindow, 0, 2) + 0.5), 7, kView
+            tablewkt kReverse, 8, kView
+            tablewkt kFreeze, 9, kView
+            tablewkt kPitch, 10, kView
+            tablewkt kSnapshotSelect, 11, kView
+            tablewkt sr, 12, kView
+            tablewkt kCarrier / kFrames, 13, kView
+            tablewkt kOverviewBins, 14, kView
+            tablewkt kSpread, 15, kView
+            tablewkt kFrames / kSourceRate, 657, kView
+            tablewkt kSourceRate, 658, kView
+            kPixel = 0
+            while iMode != 0 && kPixel < 192 do
+                if iMode == 2 then
+                    kAngle = kPixel / 192 * 6.283185307179586
+                    kPhase = (kAngle + kHeldPosition * sin(kAngle)) / 6.283185307179586
+                    kValue tablekt kPhase * kFrames, kTable
+                elseif kSnapshotSelect == 1 then
+                    kValue = kCapturedPeak[kPixel]
+                else
+                    kValue = kRingPeak[kPixel]
+                endif
+                tablewkt kValue * kHasSource, 16 + kPixel, kView
+                kPixel += 1
+            od
+            kEnvelopeShape = int(limit(kWindow, 0, 2) + 0.5)
+            kPoint = 0
+            while kPoint < 65 do
+                kPhaseView = kPoint / 64
+                if kEnvelopeShape == 0 then
+                    kAmplitude = $CM_HANN(kPhaseView)
+                elseif kEnvelopeShape == 1 then
+                    kAmplitude = $CM_TRIANGLE(kPhaseView)
+                else
+                    kAmplitude = $CM_BLACKMAN(kPhaseView)
+                endif
+                tablewkt kAmplitude, 400 + kPoint, kView
+                kPoint += 1
+            od
+            kItem = 0
+            while kItem < kCount do
+                kVoice = kList[kItem]
+                kOffsetView = 208 + 3 * kItem
+                kPosView = (kSource[kVoice] == kReadTable ? kRead[kVoice] / kSourceLength[kVoice] : -1)
+                tablewkt kPosView, kOffsetView, kView
+                tablewkt kAge[kVoice] / kSpan[kVoice], kOffsetView + 1, kView
+                kPhaseView = limit(kAge[kVoice] / kSpan[kVoice], 0, 1)
+                if kShape[kVoice] == 0 then
+                    kAmplitude = $CM_HANN(kPhaseView)
+                elseif kShape[kVoice] == 1 then
+                    kAmplitude = $CM_TRIANGLE(kPhaseView)
+                else
+                    kAmplitude = $CM_BLACKMAN(kPhaseView)
+                endif
+                tablewkt kAmplitude, kOffsetView + 2, kView
+                kItem += 1
+            od
+        endif
     endif
 
     ; Smooth actual voice count over 10 ms. Module wrappers apply a hard safety ceiling

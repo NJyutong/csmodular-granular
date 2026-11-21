@@ -1,36 +1,154 @@
 diff --git a/src/csound/CsoundGenerator.js b/src/csound/CsoundGenerator.js
-index 2406ddd..ebc8904 100644
+index 2406ddd..251967f 100644
 --- a/src/csound/CsoundGenerator.js
 +++ b/src/csound/CsoundGenerator.js
-@@ -464,7 +464,10 @@ export class CsoundGenerator {
-             if (!panel?.pulvisControls || bus === undefined || this.pulvisScopeTables.has(panel.moduleId)) continue;
-             const tableNum = previous.get(panel.moduleId) ?? this._scopeTableCounter++;
-             this.pulvisScopeTables.set(panel.moduleId, tableNum);
--            tables.set(panel.moduleId, { tableNum, bus, isAudio: true, panel });
-+            const spectrumKey = panel.moduleId + ':spectrum';
-+            const spectrumTable = previous.get(spectrumKey) ?? this._scopeTableCounter++;
-+            this.pulvisScopeTables.set(spectrumKey, spectrumTable);
-+            tables.set(panel.moduleId, { tableNum, bus, isAudio: true, panel, spectrumTable });
-         }
-         if (tables.size === 0) {
-             return { ftgens: '; no scope tables', voiceTables: '', fxTables: '' };
-@@ -494,6 +497,14 @@ export class CsoundGenerator {
-                 lines.push(`tablew kScopeSig_${info.tableNum}, k(aScopeIdx_${info.tableNum}), ${info.tableNum}, 1`);
-             }
+@@ -454,37 +454,40 @@ export class CsoundGenerator {
+     }
  
-+            if (info.spectrumTable) {
-+                // 2048-point Hann FFT: one amplitude per bin, including DC and Nyquist.
-+                const spectrum = info.spectrumTable;
-+                ftgenLines.push(`giSpectrum_${spectrum} ftgen ${spectrum}, 0, -1025, -2, 0`);
-+                lines.push(`fSpectrum_${spectrum} pvsanal aScopeSig_${info.tableNum}, 2048, 512, 2048, 1`);
-+                lines.push(`kSpectrum_${spectrum} pvsftw fSpectrum_${spectrum}, giSpectrum_${spectrum}`);
+     _generateScopeCode() {
+-        // Use the first connected output for each Pulvis display, after its layer's modules have written the bus.
+-        const tables = new Map(this._scopeTables);
+         const previous = this.pulvisScopeTables;
+         this.pulvisScopeTables = new Map();
+-        for (const cable of this._activeCables) {
+-            const panel = cable.fromJack?.parentModule;
+-            const bus = this._cableBusMap[cable.id];
+-            if (!panel?.pulvisControls || bus === undefined || this.pulvisScopeTables.has(panel.moduleId)) continue;
+-            const tableNum = previous.get(panel.moduleId) ?? this._scopeTableCounter++;
+-            this.pulvisScopeTables.set(panel.moduleId, tableNum);
+-            tables.set(panel.moduleId, { tableNum, bus, isAudio: true, panel });
+-        }
+-        if (tables.size === 0) {
+-            return { ftgens: '; no scope tables', voiceTables: '', fxTables: '' };
+-        }
+-
+         const ftgenLines = [];
++        for (const module of this.modules.values()) {
++            const panel = this.getPanelById(module.instanceId);
++            if (!panel?.pulvisControls) continue;
++            const key = panel.moduleId;
++            let display = previous.get(key + ':display');
++            if (display === undefined) {
++                display = this._scopeTableCounter;
++                this._scopeTableCounter += 3;
 +            }
-+
-             if (layer === 'fx') fxLines.push(...lines);
-             else voiceLines.push(...lines);
++            this.pulvisScopeTables.set(key + ':display', display);
++            this.pulvisScopeTables.set(key, display + 1);
++            this.pulvisScopeTables.set(key + ':spectrum', display + 2);
++            // GrainCore writes the module's post-level output before Zak routing.
++            ftgenLines.push(`giPulvisDisplay_${display} ftgen ${display}, 0, -672, -2, 0`);
++            ftgenLines.push(`giScope_${display + 1} ftgen ${display + 1}, 0, -4097, -2, 0`);
++            ftgenLines.push(`giSpectrum_${display + 2} ftgen ${display + 2}, 0, -1025, -2, 0`);
++        }
+         const voiceLines = [];
+         const fxLines = [];
+ 
+-        for (const [cableId, info] of tables) {
++        for (const [cableId, info] of this._scopeTables) {
+             ftgenLines.push(`giScope_${info.tableNum} ftgen ${info.tableNum}, 0, 4096, 2, 0`);
+ 
+             const cable = this._activeCables.find(c => c.id === cableId);
+-            const layer = info.panel?.layer || cable?.fromJack?.parentModule?.layer || 'voice';
++            const layer = cable?.fromJack?.parentModule?.layer || 'voice';
+ 
+             const lines = [];
+ 
+             // k-rate phasor: за 4096 k-блоков проходит 0..1
+             // krate = sr/ksmps, поэтому частота = (sr/ksmps) / 4096
+-            lines.push(`aScopeIdx_${info.tableNum} phasor ${info.panel ? "sr" : "(sr / ksmps)"} / 4096`);
++            lines.push(`aScopeIdx_${info.tableNum} phasor (sr / ksmps) / 4096`);
+ 
+             if (info.isAudio) {
+                 lines.push(`aScopeSig_${info.tableNum} zar ${info.bus}`);
+@@ -660,7 +663,7 @@ export class CsoundGenerator {
+                 // Проверяем, не использует ли этот номер другой кабель (от того же выхода)
+                 const isShared = this._activeCables.some(c => 
+                     c.id !== cable.id && 
+-                    this._cableBusMap[c.id] === busNumber
++                    this._cableBusMap[c.id] === busNumber && this._getCableType(c) === cableType
+                 );
+                 
+                 if (!isShared) {
+@@ -689,6 +692,8 @@ export class CsoundGenerator {
+     clearCables() {
+         this._activeCables = [];
+         this._cableBusMap = {};
++        this._availableAudioBuses = [];
++        this._availableControlBuses = [];
+         this._audioBusCounter = 2;
+         this._controlBusCounter = 2;
+         this._updateZakInit();
+@@ -699,22 +704,14 @@ export class CsoundGenerator {
+      * Обновить zakinit на основе кабелей
+      */
+     _updateZakInit() {
+-        let audioCount = 0;
+-        let controlCount = 0;
+-        
++        // Removing a low-numbered cable leaves higher routed buses in use.
++        this._audioBusCount = 2;
++        this._controlBusCount = 2;
+         for (const cable of this._activeCables) {
+-            const cableType = this._getCableType(cable);
+-            if (cableType === 'audio') {
+-                audioCount++;
+-            } else if (cableType === 'control') {
+-                controlCount++;
+-            }
++            const end = this._cableBusMap[cable.id] + 1;
++            if (this._getCableType(cable) === 'audio') this._audioBusCount = Math.max(this._audioBusCount, end);
++            else this._controlBusCount = Math.max(this._controlBusCount, end);
          }
+-        
+-        this._audioBusCount = 2 + audioCount;
+-        this._controlBusCount = 2 + controlCount;
+-        
+-        //console.log(`🎛️ zakinit: audio=${this._audioBusCount} (2 + ${audioCount}), control=${this._controlBusCount} (2 + ${controlCount})`);
+     }
+     
+     _getCableType(cable) {
+@@ -1198,6 +1195,8 @@ export class CsoundGenerator {
+             ...inletBuses.map(String),
+             ...outletBuses.map(String),
+         ];
++        const display = this.pulvisScopeTables.get(panel?.moduleId + ':display');
++        if (display !== undefined) allArgs.push(String(display));
+         const callLine = `${moduleName} ${allArgs.join(', ')}`;
+ 
+         // ⭐ 7. Конвертеры для обычных кабелей (как раньше)
+@@ -1456,6 +1455,8 @@ export class CsoundGenerator {
+         this._cableBusMap = {};
+         this._audioBusCounter = 2;
+         this._controlBusCounter = 2;
++        this._availableAudioBuses = [];
++        this._availableControlBuses = [];
+         this._audioBusCount = 2;
+         this._controlBusCount = 2;
+         this._scopeTables.clear();
+diff --git a/src/ui/ContextMenu.js b/src/ui/ContextMenu.js
+index e5c7712..7f015e7 100644
+--- a/src/ui/ContextMenu.js
++++ b/src/ui/ContextMenu.js
+@@ -95,7 +95,7 @@ export class ContextMenu {
+                 align-items: center;
+             `;
+             const libraryDisplayName = entry.meta?.displayNameI18n
+-                ? localize(entry.meta.displayNameI18n, libName === 'pulvis' ? getPulvisLanguage() : getUiLanguage())
++                ? localize(entry.meta.displayNameI18n, 'en')
+                 : entry.meta?.displayName || libName;
+             const label = document.createElement('span');
+             label.textContent = `${icon} ${libraryDisplayName}`;
+@@ -345,7 +345,7 @@ export class ContextMenu {
+     _createModuleRow(moduleEntry, libName) {
+         const { name, description } = moduleEntry;
+         const displayName = moduleEntry.displayNameI18n
+-            ? localize(moduleEntry.displayNameI18n, libName === 'pulvis' ? getPulvisLanguage() : getUiLanguage())
++            ? localize(moduleEntry.displayNameI18n, 'en')
+             : moduleEntry.displayName || description?.displayName || name;
+         const isUser = this.libraryGroups[libName]?.source === 'user';
+ 
 diff --git a/src/ui/ModuleContextMenu.js b/src/ui/ModuleContextMenu.js
-index cf72da1..a4cd90f 100644
+index cf72da1..dde3b70 100644
 --- a/src/ui/ModuleContextMenu.js
 +++ b/src/ui/ModuleContextMenu.js
 @@ -48,21 +48,64 @@ export class ModuleContextMenu {
@@ -111,7 +229,7 @@ index cf72da1..a4cd90f 100644
      const label = document.createElement('label');
      label.className = 'pulvis-language';
      label.append(this.t({ en: 'Language', zh: '语言', ru: 'Язык' }));
-@@ -73,10 +116,8 @@ export class ModuleContextMenu {
+@@ -73,15 +116,21 @@ export class ModuleContextMenu {
      ]) select.add(new Option(name, value));
      select.value = getPulvisPreference();
      select.onchange = () => {
@@ -122,86 +240,764 @@ index cf72da1..a4cd90f 100644
        positionContextMenu(this.menuElement, this.anchor.x, this.anchor.y);
        this.menuElement.querySelector('.pulvis-language select').focus();
      };
+     label.append(select);
+-    this.menuElement.append(about, label);
++    const panel = this.currentModule;
++    const viewLabel = panel.pulvisFft
++        ? { en: 'Show source', zh: '显示音源', ru: 'Показать источник' }
++        : { en: 'Show left-channel spectrum', zh: '显示左声道频谱', ru: 'Показать спектр левого канала' };
++    const view = this.createMenuItem(this.t(viewLabel), () => {
++      panel.pulvisFft = !panel.pulvisFft;
++      panel.setDirty(true);
++    });
++    this.menuElement.append(about, label, view);
+   }
+ 
+   updateMenuContent() {
 diff --git a/src/ui/PulvisPanel.js b/src/ui/PulvisPanel.js
-index d995459..d549b6f 100644
+index d995459..99861b2 100644
 --- a/src/ui/PulvisPanel.js
 +++ b/src/ui/PulvisPanel.js
-@@ -196,6 +196,44 @@ function readPanelVal(panel, id, fallback = 0) {
+@@ -2,13 +2,42 @@ import { getCurrentTheme } from '../theme/currentTheme.js';
+ import { getUiLanguage, localize, localizePulvis, getPulvisLanguage, localizeDefinition, setPulvisPreference } from '../utils/locale.js';
+ 
+ const UI_FONT = '"Microsoft YaHei UI", "PingFang SC", "Segoe UI", system-ui, Arial, sans-serif';
+-const MONO_FONT = '"JetBrains Mono", "Cascadia Mono", "Segoe UI", "Microsoft YaHei UI", monospace';
++const MONO_FONT = '"JetBrains Mono", "Cascadia Mono", "Consolas", "Segoe UI", monospace';
+ const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+ 
+-function parseHexRgb(hex, fallback = [56, 189, 248]) {
+-    if (typeof hex !== 'string') return fallback;
+-    let h = hex.trim().replace(/^#/, '');
+-    if (h.length === 3) h = h.split('').map(c => c + c).join('');
++function parseHexRgb(color, fallback = [108, 170, 210]) {
++    if (typeof color !== 'string') return fallback;
++    const c = color.trim();
++    const rgbMatch = c.match(/^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)/i);
++    if (rgbMatch) {
++        return [
++            Math.max(0, Math.min(255, Math.round(Number(rgbMatch[1])))),
++            Math.max(0, Math.min(255, Math.round(Number(rgbMatch[2])))),
++            Math.max(0, Math.min(255, Math.round(Number(rgbMatch[3])))),
++        ];
++    }
++    const hslMatch = c.match(/^hsla?\(\s*([\d.]+)\s*,\s*([\d.]+)%\s*,\s*([\d.]+)%/i);
++    if (hslMatch) {
++        const h = ((Number(hslMatch[1]) % 360) + 360) % 360;
++        const s = Math.max(0, Math.min(1, Number(hslMatch[2]) / 100));
++        const l = Math.max(0, Math.min(1, Number(hslMatch[3]) / 100));
++        const ch = (1 - Math.abs(2 * l - 1)) * s;
++        const x = ch * (1 - Math.abs(((h / 60) % 2) - 1));
++        const m = l - ch / 2;
++        const [r1, g1, b1] = h < 60 ? [ch, x, 0]
++            : h < 120 ? [x, ch, 0]
++            : h < 180 ? [0, ch, x]
++            : h < 240 ? [0, x, ch]
++            : h < 300 ? [x, 0, ch]
++            : [ch, 0, x];
++        return [
++            Math.round((r1 + m) * 255),
++            Math.round((g1 + m) * 255),
++            Math.round((b1 + m) * 255),
++        ];
++    }
++    let h = c.replace(/^#/, '');
++    if (h.length === 3) h = h.split('').map(ch => ch + ch).join('');
+     if (!/^[0-9a-fA-F]{6}$/.test(h)) return fallback;
+     return [
+         parseInt(h.slice(0, 2), 16),
+@@ -17,10 +46,25 @@ function parseHexRgb(hex, fallback = [56, 189, 248]) {
+     ];
+ }
+ 
+-function darkenHex(hex, factor = 0.65) {
+-    const [r, g, b] = parseHexRgb(hex);
++function rgbToHex(r, g, b) {
++    return '#' + [r, g, b].map(v => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0')).join('');
++}
++
++function darkenHex(color, factor = 0.72) {
++    const [r, g, b] = parseHexRgb(color);
+     const k = Math.max(0, Math.min(1, 1 - factor));
+-    return `rgb(${Math.round(r * k)}, ${Math.round(g * k)}, ${Math.round(b * k)})`;
++    return rgbToHex(r * k, g * k, b * k);
++}
++
++function blendHex(baseColor, tintColor, tintRatio = 0.16) {
++    const [br, bg, bb] = parseHexRgb(baseColor);
++    const [tr, tg, tb] = parseHexRgb(tintColor);
++    const a = Math.max(0, Math.min(1, tintRatio));
++    return rgbToHex(
++        br * (1 - a) + tr * a,
++        bg * (1 - a) + tg * a,
++        bb * (1 - a) + tb * a,
++    );
+ }
+ 
+ function hexToRgba(hex, alpha = 1) {
+@@ -30,7 +74,7 @@ function hexToRgba(hex, alpha = 1) {
+ 
+ function fillRoundedPath(ctx, x, y, w, h, r = 0) {
+     ctx.beginPath();
+-    if (r > 0 && typeof ctx.roundRect === 'function') {
++    if (typeof ctx.roundRect === 'function' && (Array.isArray(r) || r > 0)) {
+         ctx.roundRect(x, y, w, h, r);
+     } else {
+         ctx.rect(x, y, w, h);
+@@ -40,7 +84,7 @@ function fillRoundedPath(ctx, x, y, w, h, r = 0) {
+ 
+ function strokeRoundedPath(ctx, x, y, w, h, r = 0) {
+     ctx.beginPath();
+-    if (r > 0 && typeof ctx.roundRect === 'function') {
++    if (typeof ctx.roundRect === 'function' && (Array.isArray(r) || r > 0)) {
+         ctx.roundRect(x, y, w, h, r);
+     } else {
+         ctx.rect(x, y, w, h);
+@@ -49,54 +93,68 @@ function strokeRoundedPath(ctx, x, y, w, h, r = 0) {
+ }
+ 
+ function getPulvisPalette(panel) {
+-    if (panel.pulvisPalette && panel.pulvisPalette.customColor === panel.customColor) return panel.pulvisPalette;
++    const custom = panel?.customColor || null;
++    if (panel.pulvisPalette && panel.pulvisPalette.customColor === custom) return panel.pulvisPalette;
+     const modName = panel.jsonName;
++    // Restrained, desaturated hardware silkscreen accents (easy on the eyes for long sessions).
+     const accent = modName === 'GrainFreeze'
+-        ? '#c084fc'
++        ? '#a78ec9'
+         : modName === 'GrainSample'
+-            ? '#fbbf24'
+-            : '#38bdf8';
++            ? '#d1a25b'
++            : '#6caad2';
+     const accentDeep = modName === 'GrainFreeze'
+-        ? '#9333ea'
++        ? '#654f85'
+         : modName === 'GrainSample'
+-            ? '#d97706'
+-            : '#0284c7';
+-    const chassisTop = panel?.customColor ? darkenHex(panel.customColor, 0.25) : '#0f172a';
+-    const chassisBottom = panel?.customColor ? darkenHex(panel.customColor, 0.45) : '#090e1a';
++            ? '#8a6731'
++            : '#37688a';
++    const accentSoft = modName === 'GrainFreeze'
++        ? '#c2afd9'
++        : modName === 'GrainSample'
++            ? '#dfc08b'
++            : '#94c3e0';
++
++    const chassisTop = custom ? blendHex('#1e2128', custom, 0.36) : '#1e2128';
++    const chassisBottom = custom ? blendHex('#15181e', custom, 0.28) : '#15181e';
++    const headerBg = custom ? blendHex('#13161c', custom, 0.22) : '#13161c';
++    const deckBg = custom ? blendHex('#171a21', custom, 0.18) : '#171a21';
++    const footerBg = custom ? blendHex('#13161c', custom, 0.20) : '#13161c';
+ 
+     return panel.pulvisPalette = {
+-        customColor: panel.customColor,
++        customColor: custom,
+         accent,
+         accentDeep,
++        accentSoft,
+         chassisTop,
+         chassisBottom,
+-        chassisBorder: hexToRgba(accent, 0.42),
+-        headerBg: '#070b14',
+-        oledBg: '#050811',
+-        oledGrid: hexToRgba(accent, 0.08),
+-        oledBorder: hexToRgba(accent, 0.35),
+-        deckBg: 'rgba(19, 28, 46, 0.92)',
+-        deckHeaderBg: hexToRgba(accent, 0.14),
+-        deckBorder: 'rgba(148, 163, 184, 0.16)',
+-        footerBg: '#070b14',
+-        titleText: '#f8fafc',
+-        sectionText: '#f1f5f9',
+-        labelText: '#cbd5e1',
+-        mutedText: '#94a3b8',
+-        valueText: accent,
++        chassisBorder: 'rgba(255, 255, 255, 0.11)',
++        chassisBevel: 'rgba(255, 255, 255, 0.07)',
++        headerBg,
++        oledBg: '#0c0f14',
++        oledGrid: 'rgba(255, 255, 255, 0.045)',
++        oledBorder: 'rgba(255, 255, 255, 0.09)',
++        deckBg,
++        deckHeaderBg: 'rgba(255, 255, 255, 0.028)',
++        deckBorder: 'rgba(255, 255, 255, 0.068)',
++        footerBg,
++        titleText: '#edf0f5',
++        sectionText: '#cfd6e0',
++        labelText: '#c5cdd8',
++        mutedText: '#96a0b0',
++        valueText: '#e1e7ef',
+         sectionAccent: accent,
+-        pillBg: '#070b14',
+-        pillBorder: hexToRgba(accent, 0.36),
+-        controlBg: '#1e293b',
+-        controlBgHover: '#334155',
++        pillBg: '#0e1116',
++        pillBorder: 'rgba(255, 255, 255, 0.09)',
++        pillBorderActive: hexToRgba(accent, 0.65),
++        controlBg: '#202530',
++        controlBgHover: '#2a303e',
+         controlBgActive: accentDeep,
+-        controlBorder: hexToRgba(accent, 0.55),
+-        knobTrack: 'rgba(148, 163, 184, 0.20)',
+-        knobCapTop: '#263449',
+-        knobCapBottom: '#0f172a',
++        controlBorder: 'rgba(255, 255, 255, 0.13)',
++        knobTrack: 'rgba(255, 255, 255, 0.11)',
++        knobCapTop: '#2e3442',
++        knobCapBottom: '#1b1f28',
+         knobArc: accent,
+-        knobNeedle: '#ffffff',
+-        divider: 'rgba(148, 163, 184, 0.14)',
++        knobNeedle: '#f1f5f9',
++        divider: 'rgba(255, 255, 255, 0.05)',
+     };
+ }
+ 
+@@ -181,14 +239,6 @@ export function formatPulvisKnobValue(knob, panel, detailed = false) {
+     return knob.min >= 0 && knob.max <= 1 ? v.toFixed(2) : String(Math.round(v));
+ }
+ 
+-function evaluateWindowEnvelope(winIdx, t01) {
+-    const p = Math.max(0, Math.min(1, t01));
+-    if (winIdx === 1) return 1 - Math.abs(2 * p - 1);
+-    if (winIdx === 2) return 0.42 - 0.5 * Math.cos(2 * Math.PI * p) + 0.08 * Math.cos(4 * Math.PI * p);
+-    return 0.5 - 0.5 * Math.cos(2 * Math.PI * p);
+-}
+-
+-// ============================================================================
+ function readPanelVal(panel, id, fallback = 0) {
+     const c = panel.components?.find(item => String(item.id) === String(id));
+     if (!c) return fallback;
+@@ -196,6 +246,100 @@ function readPanelVal(panel, id, fallback = 0) {
      return Number.isFinite(Number(v)) ? Number(v) : fallback;
  }
  
-+// Display the magnitude bins produced by Csound on a logarithmic frequency axis.
-+function drawSpectrum(ctx, bins, x, y, width, height, palette, label) {
-+    const minHz = 40, maxHz = 20000, nyquist = 24000;
-+    const xAt = hz => x + Math.log(hz / minHz) / Math.log(maxHz / minHz) * width;
-+    const floorY = y + height - 8;
-+    ctx.save();
-+    ctx.font = '8px ' + MONO_FONT;
-+    ctx.textAlign = 'left';
++// Read-only plots. Every signal, marker and window value comes from the module's Csound tables.
++function trace(ctx, points, x, width, yAt, color, lineWidth = 1.3) {
++    ctx.beginPath();
++    for (let i = 0; i < points; i++) {
++        const px = x + i * width / (points - 1);
++        const py = yAt(i);
++        if (i) ctx.lineTo(px, py);
++        else ctx.moveTo(px, py);
++    }
++    ctx.strokeStyle = color;
++    ctx.lineWidth = lineWidth;
++    ctx.stroke();
++}
++
++function drawSpectrum(ctx, bins, rate, x, y, width, height, palette) {
++    const binHz = rate / (2 * (bins.length - 1));
++    const minHz = binHz, maxHz = Math.min(20000, rate / 2);
++    const ratio = maxHz / minHz;
++    const bottom = y + height - 9;
++    ctx.font = `500 8px ${MONO_FONT}`;
++    ctx.textAlign = 'center';
 +    ctx.textBaseline = 'bottom';
-+    ctx.fillStyle = palette.mutedText;
-+    ctx.fillText(label, x, y + 7);
-+    for (const [hz, tick] of [[100, '100'], [1000, '1k'], [10000, '10k']]) {
-+        const tx = xAt(hz);
-+        ctx.strokeStyle = palette.oledGrid;
-+        ctx.beginPath();
-+        ctx.moveTo(tx, y + 8);
-+        ctx.lineTo(tx, floorY);
-+        ctx.stroke();
-+        ctx.textAlign = 'center';
++    for (const [hz, tick] of [[100,'100'],[1000,'1k'],[10000,'10k']]) {
++        const tx = x + width * Math.log(hz / minHz) / Math.log(ratio);
++        ctx.fillStyle = palette.oledGrid;
++        ctx.fillRect(tx, y, 1, bottom - y);
++        ctx.fillStyle = palette.mutedText;
 +        ctx.fillText(tick, tx, y + height + 1);
 +    }
-+    if (bins?.length > 1) {
-+        const count = 36;
-+        const binHz = nyquist / (bins.length - 1);
-+        ctx.fillStyle = palette.accent;
++    // Interpolate sparse bass bins, retain the largest measured bin in each treble pixel.
++    trace(ctx, width, x, width, i => {
++        const bin = ratio ** (i / (width - 1));
++        const first = Math.floor(bin);
++        const end = Math.min(bins.length - 1, Math.floor(ratio ** ((i + 1) / (width - 1))));
++        let peak = bins[first] + (bin - first) * (bins[Math.min(first + 1, bins.length - 1)] - bins[first]);
++        for (let j = first + 1; j <= end; j++) peak = Math.max(peak, bins[j]);
++        const db = 20 * Math.log10(Math.max(peak, 0.00001));
++        return bottom - Math.max(0, Math.min(1, (db + 72) / 72)) * (bottom - y);
++    }, palette.accentSoft);
++}
++
++function drawSource(ctx, frame, output, mode, x, y, w, h, palette) {
++    const osc = mode === 'GrainOsc', live = mode === 'GrainFreeze';
++    const mid = y + h / 2;
++    const yAt = value => mid - Math.max(-1, Math.min(1, value)) * (h / 2 - 2);
++    const wrap = value => value - Math.floor(value);
++    const reverse = frame[8] >= 0.5;
++    const phaseAt = t => wrap((reverse ? -2 : 2) * t);
++    const carrier = phase => frame[16 + Math.floor(phase * 192) % 192];
++    if (osc) {
++        trace(ctx, w, x, w, i => yAt(carrier(phaseAt(i / (w - 1)))), palette.accentSoft);
++        if (output?.length >= 4097) {
++            const head = Math.round(output[4096]) % 4096;
++            const period = frame[12] / (220 * 2 ** (frame[10] / 12));
++            const span = Math.min(4095, Math.round(2 * period));
++            trace(ctx, w, x, w, i => yAt(output[(head + 4095 - span + Math.round(i * span / (w - 1))) % 4096]),
++                hexToRgba(palette.accent, 0.8), 1);
++        }
++    } else {
++        const count = live ? 192 : Math.min(192, frame[14]);
++        ctx.fillStyle = hexToRgba(palette.accent, 0.58);
 +        for (let i = 0; i < count; i++) {
-+            const first = Math.max(1, Math.round(minHz * (maxHz / minHz) ** (i / count) / binHz));
-+            const end = Math.max(first + 1, Math.round(minHz * (maxHz / minHz) ** ((i + 1) / count) / binHz));
-+            let peak = 0;
-+            for (let bin = first; bin < end; bin++) peak = Math.max(peak, bins[bin]);
-+            const level = Math.max(0, Math.min(1, (20 * Math.log10(peak) + 72) / 72));
-+            const barHeight = level * (floorY - y - 7);
-+            ctx.fillRect(x + i * width / count, floorY - barHeight, width / count - 1, barHeight);
++            const top = yAt(frame[16 + i]);
++            const bottom = yAt(live ? -frame[16 + i] : frame[465 + i]);
++            ctx.fillRect(x + i * w / 192, top, w / 192 + 0.3, Math.max(1, bottom - top));
++        }
++        const pos = live ? wrap(frame[4] - frame[2] * frame[5]) : frame[2];
++        const radius = frame[3] * (live ? frame[5] : 1);
++        ctx.fillStyle = hexToRgba(palette.accent, 0.13);
++        for (const shift of live ? [-1, 0, 1] : [0]) {
++            const lo = Math.max(0, pos + shift - radius);
++            const hi = Math.min(1, pos + shift + radius);
++            if (hi > lo) ctx.fillRect(x + lo * w, y, (hi - lo) * w, h);
++        }
++        ctx.fillStyle = palette.accentSoft;
++        ctx.fillRect(x + pos * w, y, 1, h);
++        if (live) {
++            ctx.fillStyle = '#f8f8f8';
++            ctx.fillRect(x + frame[4] * w, y, 1.5, h);
 +        }
 +    }
-+    ctx.restore();
++    for (let i = 0; i < frame[1]; i++) {
++        const pos = frame[208 + 3 * i];
++        if (pos < 0) continue;
++        const amp = frame[210 + 3 * i];
++        const px = osc ? phaseAt(pos / 2) / 2 : pos;
++        const dotY = osc ? yAt(carrier(pos)) : mid;
++        ctx.fillStyle = palette.accentSoft;
++        ctx.beginPath();
++        ctx.arc(x + px * w, dotY, 1.3 + 1.8 * amp, 0, 2 * Math.PI);
++        ctx.fill();
++    }
 +}
 +
  function drawPulvisStudioChassisAndOled(panel, ctx, palette) {
      const px = panel.pixelX;
      const py = panel.pixelY;
-@@ -344,11 +382,15 @@ function drawPulvisStudioChassisAndOled(panel, ctx, palette) {
-             ctx.fillText(label, x + 72, scopeY + 16);
-         });
+@@ -206,60 +350,61 @@ function drawPulvisStudioChassisAndOled(panel, ctx, palette) {
+ 
+     const engine = panel.parentSystem.csoundEngine;
+     const tr = (en, zh, ru) => localize({ en, zh, ru }, lang);
+-    const density = readPanelVal(panel, 1, 12);
+-    const sizeMs = readPanelVal(panel, 2, 80);
+-    const winIdx = Math.max(0, Math.min(2, Math.round(readPanelVal(panel, 7, 0))));
+-    const spreadNorm = Math.max(0, Math.min(1, readPanelVal(panel, 9, 64) / 127));
+-    const overlap = ((density * sizeMs) / 1000).toFixed(1);
++    const running = engine.state === 'running' && !engine.isRecompiling;
++    const data = running && engine.getScopeBuffer(panel.moduleId + ':display');
++    const frame = data?.[0] === 1 ? data : null;
++    const winIdx = frame ? frame[7] : Math.round(readPanelVal(panel, 7));
+ 
+     ctx.save();
+ 
+-    // Leave the host surface visible through the tinted chassis.
++    // 1. Matte Anodized Graphite Chassis (strictly rounded — no square corners poking out).
+     const theme = getCurrentTheme();
+-    ctx.fillStyle = panel.customColor || (theme.isLcd && theme.getSurfaceColor()) || panel.defaultColor;
+-    ctx.fillRect(px, py, w, h);
++    const baseSurface = panel.customColor || (theme.isLcd && theme.getSurfaceColor()) || '#15181e';
++    ctx.fillStyle = darkenHex(baseSurface, 0.72);
++    fillRoundedPath(ctx, px, py, w, h, 8);
++
+     const grad = ctx.createLinearGradient(px, py, px, py + h);
+-    grad.addColorStop(0, hexToRgba(palette.chassisTop, 0.76));
+-    grad.addColorStop(1, hexToRgba(palette.chassisBottom, 0.88));
++    grad.addColorStop(0, hexToRgba(palette.chassisTop, 0.94));
++    grad.addColorStop(1, hexToRgba(palette.chassisBottom, 0.98));
+     ctx.fillStyle = grad;
+     fillRoundedPath(ctx, px, py, w, h, 8);
+ 
+-    // 2. Top Studio Header Bar (y = 0..28)
++    // 2. Clean Hardware Header Bar (y = 0..27) — no top-right pill badge, no harsh neon bar.
+     ctx.fillStyle = palette.headerBg;
+-    fillRoundedPath(ctx, px + 1, py + 1, w - 2, 27, 7);
+-    ctx.fillStyle = palette.accent;
+-    fillRoundedPath(ctx, px + 12, py + 1, w - 24, 2, 1);
++    fillRoundedPath(ctx, px + 1, py + 1, w - 2, 26, [7, 7, 0, 0]);
++
++    ctx.strokeStyle = palette.chassisBevel;
++    ctx.lineWidth = 1;
++    ctx.beginPath();
++    ctx.moveTo(px + 9, py + 1.5);
++    ctx.lineTo(px + w - 9, py + 1.5);
++    ctx.stroke();
+ 
++    ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
+     ctx.beginPath();
+-    ctx.arc(px + 15, py + 15, 3.8, 0, Math.PI * 2);
++    ctx.moveTo(px + 1, py + 27.5);
++    ctx.lineTo(px + w - 1, py + 27.5);
++    ctx.stroke();
++
++    // Subtle machined LED indicator dot + crisp title.
++    ctx.beginPath();
++    ctx.arc(px + 15, py + 14.5, 5.2, 0, Math.PI * 2);
++    ctx.fillStyle = hexToRgba(palette.accent, 0.16);
++    ctx.fill();
++    ctx.beginPath();
++    ctx.arc(px + 15, py + 14.5, 2.8, 0, Math.PI * 2);
+     ctx.fillStyle = palette.accent;
+     ctx.fill();
+ 
+     ctx.fillStyle = palette.titleText;
+-    ctx.font = `bold 12.5px ${UI_FONT}`;
++    ctx.font = `600 12px ${UI_FONT}`;
+     ctx.textAlign = 'left';
+     ctx.textBaseline = 'middle';
+-    ctx.fillText(panel.title, px + 25, py + 15);
++    ctx.fillText(panel.title, px + 26, py + 15, w - 40);
+ 
+-    const badge = modName === 'GrainFreeze'
+-        ? tr('FX · 8 s ring', 'FX · 8 秒缓冲', 'FX · буфер 8 с')
+-        : modName === 'GrainSample'
+-            ? tr('WAV · 8 slots', 'WAV · 8 槽', 'WAV · 8 слотов')
+-            : tr('OSC · 64 voices', 'OSC · 64 声部', 'OSC · 64 голоса');
+-    ctx.font = `bold 9.5px ${MONO_FONT}`;
+-    const bw = ctx.measureText(badge).width + 14;
+-    const bx = px + w - bw - 10;
+-    const by = py + 6;
+-    ctx.fillStyle = hexToRgba(palette.accent, 0.14);
+-    fillRoundedPath(ctx, bx, by, bw, 17, 8.5);
+-    ctx.strokeStyle = palette.pillBorder;
+-    ctx.lineWidth = 1;
+-    strokeRoundedPath(ctx, bx, by, bw, 17, 8.5);
+-    ctx.fillStyle = palette.accent;
+-    ctx.textAlign = 'center';
+-    ctx.fillText(badge, bx + bw / 2, by + 8.5);
++    const fft = Boolean(panel.pulvisFft);
+ 
+-    // 3. Full-Width Real-Time OLED Oscilloscope & Granular Cloud Display (x = 10..490, y = 32..90)
++    // 3. Recessed Full-Width OLED Display (x = 10..490, y = 32..90)
+     const ox = px + 10;
+     const oy = py + 32;
+     const ow = w - 20;
+@@ -267,33 +412,41 @@ function drawPulvisStudioChassisAndOled(panel, ctx, palette) {
+ 
+     ctx.fillStyle = palette.oledBg;
+     fillRoundedPath(ctx, ox, oy, ow, oh, 6);
++
++    // Subtle top inner glass shadow.
++    const oledShade = ctx.createLinearGradient(ox, oy, ox, oy + 12);
++    oledShade.addColorStop(0, 'rgba(0, 0, 0, 0.42)');
++    oledShade.addColorStop(1, 'rgba(0, 0, 0, 0)');
++    ctx.fillStyle = oledShade;
++    fillRoundedPath(ctx, ox + 1, oy + 1, ow - 2, 12, [5, 5, 0, 0]);
++
+     ctx.strokeStyle = palette.oledBorder;
+-    ctx.lineWidth = 1.2;
+-    strokeRoundedPath(ctx, ox, oy, ow, oh, 6);
++    ctx.lineWidth = 1;
++    strokeRoundedPath(ctx, ox + 0.5, oy + 0.5, ow - 1, oh - 1, 6);
+ 
+-    const envX = ox + ow - 136;
++    const envX = ox + ow - 134;
+     ctx.strokeStyle = palette.oledGrid;
+     ctx.lineWidth = 1;
+     ctx.beginPath();
+-    for (let gx = ox + 32; gx < envX - 8; gx += 32) {
+-        ctx.moveTo(gx, oy + 4);
+-        ctx.lineTo(gx, oy + oh - 4);
++    for (let gx = ox + 36; gx < envX - 8; gx += 36) {
++        ctx.moveTo(gx + 0.5, oy + 5);
++        ctx.lineTo(gx + 0.5, oy + oh - 5);
+     }
+-    ctx.moveTo(ox + 6, oy + 20 + (oh - 26) / 2);
+-    ctx.lineTo(envX - 8, oy + 20 + (oh - 26) / 2);
++    ctx.moveTo(ox + 8, Math.round(oy + 20 + (oh - 26) / 2) + 0.5);
++    ctx.lineTo(envX - 10, Math.round(oy + 20 + (oh - 26) / 2) + 0.5);
+     ctx.stroke();
+ 
+-    ctx.strokeStyle = hexToRgba(palette.accent, 0.22);
++    ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+     ctx.beginPath();
+-    ctx.moveTo(envX - 6, oy + 6);
+-    ctx.lineTo(envX - 6, oy + oh - 6);
++    ctx.moveTo(envX - 6.5, oy + 7);
++    ctx.lineTo(envX - 6.5, oy + oh - 7);
+     ctx.stroke();
+ 
+     const scopeX = ox + 10;
+     const scopeY = oy + 20;
+     const scopeW = envX - scopeX - 14;
+     const scopeH = oh - 26;
+-    const scopeMidY = scopeY + scopeH / 2;
++
+     const activeSlot = Math.max(1, Math.min(8, Math.round(readPanelVal(panel, 14, 1))));
+     const slotsMap = engine.grainSamples.slots;
+     const activeEntry = slotsMap.get(activeSlot);
+@@ -306,113 +459,116 @@ function drawPulvisStudioChassisAndOled(panel, ctx, palette) {
+             const sy = oy + 4;
+             const isSel = s === activeSlot;
+             const isLoaded = Boolean(slotsMap?.get?.(s));
+-            ctx.fillStyle = isSel ? hexToRgba(palette.accent, 0.30) : 'rgba(30, 41, 59, 0.78)';
+-            fillRoundedPath(ctx, sx, sy, slotW, 13, 3);
+-            ctx.strokeStyle = isSel ? palette.accent : isLoaded ? '#10b981' : 'rgba(148, 163, 184, 0.25)';
+-            ctx.lineWidth = isSel ? 1.3 : 1;
+-            strokeRoundedPath(ctx, sx, sy, slotW, 13, 3);
+-
+-            ctx.fillStyle = isSel ? '#ffffff' : isLoaded ? '#34d399' : '#94a3b8';
+-            ctx.font = `bold 8px ${MONO_FONT}`;
++            ctx.fillStyle = isSel ? hexToRgba(palette.accent, 0.24) : isLoaded ? '#172220' : '#161a22';
++            fillRoundedPath(ctx, sx, sy, slotW, 13, 2.5);
++            ctx.strokeStyle = isSel ? palette.accent : isLoaded ? '#49997b' : 'rgba(255, 255, 255, 0.09)';
++            ctx.lineWidth = isSel ? 1.2 : 0.9;
++            strokeRoundedPath(ctx, sx + 0.5, sy + 0.5, slotW - 1, 12, 2.5);
++
++            ctx.fillStyle = isSel ? '#f4f7fa' : isLoaded ? '#86cfa8' : '#8590a2';
++            ctx.font = `600 9px ${MONO_FONT}`;
+             ctx.textAlign = 'center';
+             ctx.textBaseline = 'middle';
+-            ctx.fillText(`#${s}`, sx + slotW / 2, sy + 6.5);
++            ctx.fillText(`#${s}`, sx + slotW / 2, sy + 6.8);
+         }
+ 
++        ctx.font = `500 9.5px ${UI_FONT}`;
+         ctx.textAlign = 'right';
+-        ctx.fillStyle = palette.labelText;
+-        ctx.fillText(activeEntry?.name || tr('Empty', '空槽', 'Пусто'), scopeX + scopeW, oy + 11, scopeW - 174);
++        ctx.textBaseline = 'middle';
++        ctx.fillStyle = activeEntry ? palette.valueText : palette.mutedText;
++        const sampleInfo = frame && frame[659] === activeSlot && activeEntry
++            ? `${activeEntry.name} · ${frame[657].toFixed(2)}s · ${(frame[658] / 1000).toFixed(1)}k`
++            : activeEntry?.name || tr('Empty', '空槽', 'Пусто');
++        ctx.fillText(sampleInfo, scopeX + scopeW, oy + 11, scopeW - 172);
      } else {
-+        const waveWidth = Math.floor(scopeW / 2);
-+        const spectrum = engine.state === 'running' && engine.getScopeBuffer(panel.moduleId + ':spectrum');
-+        drawSpectrum(ctx, spectrum, scopeX + waveWidth + 6, scopeY, scopeW - waveWidth - 6, scopeH,
-+            palette, tr('Spectrum · Hz', '频谱 · Hz', 'Спектр · Гц'));
-         const buffer = engine.state === 'running' && engine.getScopeBuffer(panel.moduleId);
-         if (buffer?.length) {
-             ctx.beginPath();
+-        const source = modName === 'GrainOsc'
+-            ? formatPulvisKnobValue(panel.pulvisControls.get('Wave'), panel, true)
+-            : [panel.pulvisControls.get('Freeze').currentItem, panel.pulvisControls.get('Source').currentItem].join(' · ');
+-        ctx.font = 'bold 10px ' + UI_FONT;
+-        ctx.fillStyle = palette.accent;
++        const isOsc = modName === 'GrainOsc';
++        const source = isOsc
++            ? formatPulvisKnobValue(frame ? {csoundName:'Wave', value:frame[659]} : panel.pulvisControls.get('Wave'), panel)
++            : frame ? (frame[11] ? tr('Snapshot', '快照', 'Снимок') : tr('Live', '实时', 'Вход'))
++                : panel.pulvisControls.get('Source').currentItem;
++        ctx.font = `600 10px ${UI_FONT}`;
++        ctx.fillStyle = palette.accentSoft;
+         ctx.textAlign = 'left';
+-        ctx.fillText(source, scopeX, oy + 11);
+-        ctx.textAlign = 'right';
+-        ctx.fillText(modName === 'GrainOsc' ? pitchToNoteAndHz(readPanelVal(panel, 5)).hz
+-            : formatPulvisKnobValue(panel.pulvisControls.get('Position'), panel, true), scopeX + scopeW, oy + 11);
++        ctx.textBaseline = 'middle';
++        const pitch = frame && pitchToNoteAndHz(frame[10]);
++        const detail = isOsc && frame ? ` · ${pitch.note} ${pitch.hz} · ${frame[659] ? [24,12,6,3,1][frame[660]] : 1}H` : '';
++        ctx.fillText(source + detail, scopeX, oy + 11, scopeW * 0.56);
++        if (frame) {
++            const state = frame[9] >= 0.5 ? tr('Hold', '锁定', 'Удерж.')
++                : isOsc ? tr('Warp', '扭曲', 'Изгиб') : tr('Record', '录入', 'Запись');
++            ctx.textAlign = 'right';
++            ctx.fillText(`${state} · ${Math.round(frame[2] * 100)}% ${frame[8] ? '◀' : '▶'}`,
++                scopeX + scopeW, oy + 11, scopeW * 0.44);
++        }
+     }
+-    if (isSample && !activeEntry) {
+-        [tr('Load demo WAV', '载入示例 WAV', 'Демо WAV'), tr('Open WAV…', '导入 WAV…', 'Открыть WAV…')].forEach((label, i) => {
+-            const x = scopeX + i * 150;
+-            ctx.fillStyle = palette.controlBg;
+-            fillRoundedPath(ctx, x, scopeY + 6, 144, 20, 4);
+-            ctx.fillStyle = palette.valueText;
+-            ctx.textAlign = 'center';
+-            ctx.fillText(label, x + 72, scopeY + 16);
+-        });
++
++    if (isSample && !activeEntry && !fft) {
++        const btnW = 160;
++        const btnX = scopeX + Math.round((scopeW - btnW) / 2);
++        const label = tr('Open WAV…', '导入 WAV…', 'Открыть WAV…');
++        ctx.fillStyle = '#1b2029';
++        fillRoundedPath(ctx, btnX, scopeY + 6, btnW, 20, 4);
++        ctx.strokeStyle = 'rgba(255, 255, 255, 0.14)';
++        ctx.lineWidth = 1;
++        strokeRoundedPath(ctx, btnX + 0.5, scopeY + 6.5, btnW - 1, 19, 4);
++        ctx.fillStyle = palette.accentSoft;
++        ctx.font = `600 9.5px ${UI_FONT}`;
++        ctx.textAlign = 'center';
++        ctx.textBaseline = 'middle';
++        ctx.fillText(label, btnX + btnW / 2, scopeY + 16.5, btnW - 12);
+     } else {
+-        const buffer = engine.state === 'running' && engine.getScopeBuffer(panel.moduleId);
+-        if (buffer?.length) {
+-            ctx.beginPath();
 -            for (let i = 0; i < scopeW; i++) {
 -                const amplitude = Math.max(-1, Math.min(1, buffer[i]));
-+            for (let i = 0; i < waveWidth; i++) {
-+                const amplitude = Math.max(-1, Math.min(1, buffer[i * 2]));
-                 const y = scopeMidY - amplitude * scopeH * 0.46;
-                 if (i === 0) ctx.moveTo(scopeX, y);
-                 else ctx.lineTo(scopeX + i, y);
-@@ -361,7 +403,7 @@ function drawPulvisStudioChassisAndOled(panel, ctx, palette) {
-             const status = engine.state === 'running' ? tr('Connect an audio output', '请连接音频输出', 'Подключите аудиовыход')
-                 : engine.state === 'error' ? tr('Csound error', 'Csound 错误', 'Ошибка Csound')
-                 : tr('Csound stopped', 'Csound 已停止', 'Csound остановлен');
+-                const y = scopeMidY - amplitude * scopeH * 0.46;
+-                if (i === 0) ctx.moveTo(scopeX, y);
+-                else ctx.lineTo(scopeX + i, y);
+-            }
+-            ctx.strokeStyle = palette.accent;
+-            ctx.stroke();
++        const bins = frame && fft && engine.getScopeBuffer(panel.moduleId + ':spectrum');
++        if (fft && bins?.length > 1) {
++            drawSpectrum(ctx, bins, frame[12], scopeX, scopeY, scopeW, scopeH, palette);
++        } else if (!fft && frame?.[6] && (!isSample || frame[659] === activeSlot)) {
++            drawSource(ctx, frame, engine.getScopeBuffer(panel.moduleId), modName, scopeX, scopeY, scopeW, scopeH, palette);
+         } else {
++            const status = !running ? (engine.state === 'error' ? tr('Csound error', 'Csound 错误', 'Ошибка Csound')
++                : tr('Csound stopped', 'Csound 已停止', 'Csound остановлен'))
++                : frame && !frame[6] ? tr('No snapshot captured', '尚未捕捉快照', 'Нет снимка')
++                : tr('Waiting for Csound', '等待读取 Csound', 'Ожидание Csound');
+             ctx.fillStyle = palette.mutedText;
+-            ctx.textAlign = 'left';
+-            const status = engine.state === 'running' ? tr('Connect an audio output', '请连接音频输出', 'Подключите аудиовыход')
+-                : engine.state === 'error' ? tr('Csound error', 'Csound 错误', 'Ошибка Csound')
+-                : tr('Csound stopped', 'Csound 已停止', 'Csound остановлен');
 -            ctx.fillText(status, scopeX, scopeMidY);
-+            ctx.fillText(status, scopeX, scopeMidY, waveWidth - 4);
++            ctx.font = `500 10px ${UI_FONT}`;
++            ctx.textAlign = 'center';
++            ctx.textBaseline = 'middle';
++            ctx.fillText(status, scopeX + scopeW / 2, scopeY + scopeH / 2);
          }
      }
  
-@@ -474,23 +516,6 @@ function drawTextLabel(ctx) {
-             ctx.restore();
-             return;
-         }
++    // Grain Window Envelope Preview (right pane of OLED)
+     const winNames = lang === 'zh'
+-        ? ['汉宁包络', '三角包络', '布莱克曼']
++        ? ['汉宁窗', '三角窗', '布莱克曼']
+         : lang === 'ru'
+-            ? ['Окно Ханна', 'Треуг. окно', 'Блэкман']
+-            : ['Hann Env', 'Tri Env', 'Blackman'];
+-    const ew = 124;
+-    const eh = 28;
++            ? ['Ханн', 'Треуг.', 'Блэкман']
++            : ['Hann', 'Triangle', 'Blackman'];
++    const ew = 122;
++    const eh = 27;
+     const ex = envX + 2;
+-    const ey = oy + 19;
++    const ey = oy + 20;
+ 
+     ctx.fillStyle = palette.mutedText;
+-    ctx.font = `bold 9px ${UI_FONT}`;
++    ctx.font = `600 9px ${UI_FONT}`;
+     ctx.textAlign = 'left';
+-    ctx.fillText(winNames[winIdx], ex, oy + 11);
++    ctx.textBaseline = 'middle';
++    ctx.fillText(winNames[winIdx], ex, oy + 11, 56);
+ 
+-    ctx.fillStyle = palette.accent;
+-    ctx.font = `bold 9px ${MONO_FONT}`;
++    ctx.fillStyle = palette.accentSoft;
++    ctx.font = `600 9px ${MONO_FONT}`;
+     ctx.textAlign = 'right';
+-    ctx.fillText(`${overlap}× (${Math.round(spreadNorm * 100)}%W)`, ex + ew, oy + 11);
+-
+-    ctx.beginPath();
+-    ctx.moveTo(ex, ey + eh);
+-    const eSteps = 36;
+-    for (let i = 0; i <= eSteps; i++) {
+-        const t = i / eSteps;
+-        const amp = evaluateWindowEnvelope(winIdx, t);
+-        ctx.lineTo(ex + t * ew, ey + eh - amp * (eh - 3));
+-    }
+-    ctx.lineTo(ex + ew, ey + eh);
+-    ctx.closePath();
+-    ctx.fillStyle = hexToRgba(palette.accent, 0.22);
+-    ctx.fill();
+-
+-    ctx.beginPath();
+-    for (let i = 0; i <= eSteps; i++) {
+-        const t = i / eSteps;
+-        const amp = evaluateWindowEnvelope(winIdx, t);
+-        const cx = ex + t * ew;
+-        const cy = ey + eh - amp * (eh - 3);
+-        if (i === 0) ctx.moveTo(cx, cy);
+-        else ctx.lineTo(cx, cy);
++    if (frame) {
++        ctx.fillText(`${frame[1]} · ${Math.round(frame[15] * 100)}%`, ex + ew, oy + 11, 64);
++        trace(ctx, 65, ex, ew, i => ey + eh - frame[400 + i] * (eh - 3), palette.accent);
++        ctx.fillStyle = palette.accentSoft;
++        for (let i = 0; i < frame[1]; i++) {
++            const progress = frame[209 + i * 3], amplitude = frame[210 + i * 3];
++            ctx.beginPath();
++            ctx.arc(ex + progress * ew, ey + eh - amplitude * (eh - 3), 2, 0, 2 * Math.PI);
++            ctx.fill();
++        }
+     }
+-    ctx.strokeStyle = palette.accent;
+-    ctx.lineWidth = 1.6;
+-    ctx.stroke();
+ 
+-    // 4. Two Side-by-Side Bento Control Decks (Left: x=10..246, Right: x=254..490, y=96..262)
+-    for (const deckX of [px + 10, px + 254]) {
++    // 4. Two Side-by-Side Matte Hardware Control Decks (Left: x=10..246, Right: x=254..490, y=96..262)
++    [px + 10, px + 254].forEach((deckX, deckIdx) => {
+         const deckY = py + 96;
+         const deckW = 236;
+         const deckH = 166;
+@@ -421,33 +577,42 @@ function drawPulvisStudioChassisAndOled(panel, ctx, palette) {
+         fillRoundedPath(ctx, deckX, deckY, deckW, deckH, 6);
+ 
+         ctx.fillStyle = palette.deckHeaderBg;
+-        fillRoundedPath(ctx, deckX + 1, deckY + 1, deckW - 2, 19, 5);
+-        ctx.fillStyle = palette.accent;
+-        fillRoundedPath(ctx, deckX + 1, deckY + 3, 3, 15, 1.5);
++        fillRoundedPath(ctx, deckX + 1, deckY + 1, deckW - 2, 19, [5, 5, 0, 0]);
++        ctx.fillStyle = hexToRgba(palette.accent, 0.78);
++        fillRoundedPath(ctx, deckX + 6, deckY + 5, 2.5, 11, 1.2);
+ 
+         ctx.strokeStyle = palette.deckBorder;
+         ctx.lineWidth = 1;
+-        strokeRoundedPath(ctx, deckX, deckY, deckW, deckH, 6);
++        strokeRoundedPath(ctx, deckX + 0.5, deckY + 0.5, deckW - 1, deckH - 1, 6);
+ 
+         ctx.strokeStyle = palette.divider;
+         ctx.beginPath();
+-        ctx.moveTo(deckX + 8, py + 163);
+-        ctx.lineTo(deckX + deckW - 8, py + 163);
+-        ctx.moveTo(deckX + 8, py + 211);
+-        ctx.lineTo(deckX + deckW - 8, py + 211);
++        ctx.moveTo(deckX + 8, py + 115.5);
++        ctx.lineTo(deckX + deckW - 8, py + 115.5);
++        if (modName === 'GrainOsc' && deckIdx === 1) {
++            // GrainOsc right deck has 2 spacious 3-column rows centered vertically.
++            ctx.moveTo(deckX + 8, py + 188.5);
++            ctx.lineTo(deckX + deckW - 8, py + 188.5);
++        } else {
++            ctx.moveTo(deckX + 8, py + 163.5);
++            ctx.lineTo(deckX + deckW - 8, py + 163.5);
++            ctx.moveTo(deckX + 8, py + 211.5);
++            ctx.lineTo(deckX + deckW - 8, py + 211.5);
++        }
+         ctx.stroke();
+-    }
++    });
+ 
+-    // 5. Bottom Audio Bus Footer Bar (x = 10..490, y = 266..294)
++    // 5. Quiet Recessed Audio Bus Footer Bar (x = 10..490, y = 266..294)
+     ctx.fillStyle = palette.footerBg;
+     fillRoundedPath(ctx, px + 10, py + 266, w - 20, 28, 5);
+     ctx.strokeStyle = palette.deckBorder;
+     ctx.lineWidth = 1;
+-    strokeRoundedPath(ctx, px + 10, py + 266, w - 20, 28, 5);
++    strokeRoundedPath(ctx, px + 10.5, py + 266.5, w - 21, 27, 5);
+ 
++    // Subtle machined outer perimeter frame
+     ctx.strokeStyle = palette.chassisBorder;
+-    ctx.lineWidth = 1.5;
+-    strokeRoundedPath(ctx, px + 0.75, py + 0.75, w - 1.5, h - 1.5, 8);
++    ctx.lineWidth = 1;
++    strokeRoundedPath(ctx, px + 0.5, py + 0.5, w - 1, h - 1, 8);
+ 
+     ctx.restore();
+ }
+@@ -459,55 +624,56 @@ function drawTextLabel(ctx) {
+     const idNum = Number(this.id);
+ 
+     ctx.save();
+-    {
+-        if (idNum === 900 || idNum === 901) {
+-            ctx.restore();
+-            return;
+-        }
+-        if (idNum >= 910 && idNum <= 919) {
+-            ctx.fillStyle = palette.sectionText;
+-            ctx.font = `bold 10.5px ${UI_FONT}`;
+-            ctx.textAlign = 'left';
+-            ctx.textBaseline = 'middle';
+-            const cleanTitle = String(this.text || '').replace(/^0?[1-9]\s*[·•.]\s*/, '');
+-            ctx.fillText(cleanTitle, this.x + 2, panel.pixelY + 106.5);
+-            ctx.restore();
+-            return;
+-        }
 -        if (idNum === 930 || idNum === 931) {
 -            if (idNum === 930) {
 -                const cardW = panel.jsonName === 'GrainSample' ? 144 : 218;
@@ -219,14 +1015,469 @@ index d995459..d549b6f 100644
 -            ctx.restore();
 -            return;
 -        }
-         if (idNum === 932 || idNum >= 600) {
-             ctx.fillStyle = idNum >= 600 ? palette.titleText : palette.mutedText;
-             ctx.font = `bold 10px ${UI_FONT}`;
+-        if (idNum === 932 || idNum >= 600) {
+-            ctx.fillStyle = idNum >= 600 ? palette.titleText : palette.mutedText;
+-            ctx.font = `bold 10px ${UI_FONT}`;
++    if (idNum === 900 || idNum === 901) {
++        ctx.restore();
++        return;
++    }
++    if (idNum >= 910 && idNum <= 919) {
++        ctx.fillStyle = palette.sectionText;
++        ctx.font = `600 10px ${UI_FONT}`;
++        ctx.textAlign = 'left';
++        ctx.textBaseline = 'middle';
++        const cleanTitle = String(this.text || '').replace(/^0?[1-9]\s*[·•.]\s*/, '');
++        ctx.fillText(cleanTitle, this.x + 5, panel.pixelY + 106.5, 214);
++        ctx.restore();
++        return;
++    }
++    if (idNum === 932) {
++        // Right-aligned bus caption so Russian/English/Chinese text never touches the L/R output labels.
++        ctx.fillStyle = palette.mutedText;
++        ctx.font = `600 9.5px ${UI_FONT}`;
++        ctx.textAlign = 'right';
++        ctx.textBaseline = 'middle';
++        ctx.fillText(this.text, panel.pixelX + 402, panel.pixelY + 280.5, 230);
++        ctx.restore();
++        return;
++    }
++    if (idNum >= 600) {
++        ctx.fillStyle = palette.titleText;
++        ctx.font = `600 10px ${UI_FONT}`;
++        ctx.textBaseline = 'middle';
++        if (idNum === 701) {
++            ctx.textAlign = 'right';
++            ctx.fillText(this.text, panel.pixelX + 418, panel.pixelY + 280.5, 16);
++        } else if (idNum === 702) {
++            ctx.textAlign = 'right';
++            ctx.fillText(this.text, panel.pixelX + 460, panel.pixelY + 280.5, 16);
++        } else {
+             ctx.textAlign = 'left';
+-            ctx.textBaseline = 'middle';
+-            ctx.fillText(this.text, this.x, panel.pixelY + 280);
+-            ctx.restore();
+-            return;
++            ctx.fillText(this.text, panel.pixelX + 20, panel.pixelY + 280.5, 76);
+         }
++        ctx.restore();
++        return;
+     }
+ 
+-    const fontSize = Math.max(10, this.fontSize);
+-    ctx.font = `600 ${fontSize}px ${UI_FONT}`;
++    // Parameter labels: crisp weight + 68px maxWidth keeps a clean >=8px gutter between all columns.
++    // Freeze's Feedback label (id 316) spans above the unlabelled Capture button, so it has wide clearance.
++    const maxW = (panel.jsonName === 'GrainFreeze' && idNum === 316) ? 136 : 68;
++    ctx.font = `600 9.8px ${UI_FONT}`;
+     ctx.fillStyle = palette.labelText;
+     ctx.textAlign = this.align || 'left';
+     ctx.textBaseline = this.baseline || 'top';
+-    ctx.fillText(this.text, this.x, this.y, 73);
++    ctx.fillText(this.text, this.x, this.y - 1, maxW);
+     ctx.restore();
+ }
+ 
+@@ -516,20 +682,20 @@ function drawInput(ctx) {
+     const palette = getPulvisPalette(panel);
+     const center = this.center;
+     const isAudio = this.type === 'audio';
+-    const r = isAudio ? 6.2 : 5.2;
++    const r = isAudio ? 6 : 5;
+ 
+     ctx.save();
+     ctx.beginPath();
+     ctx.arc(center.x, center.y, r, 0, Math.PI * 2);
+-    ctx.fillStyle = isAudio ? hexToRgba(palette.accent, 0.22) : '#0b111e';
++    ctx.fillStyle = isAudio ? hexToRgba(palette.accent, 0.16) : '#0e1116';
+     ctx.fill();
+-    ctx.strokeStyle = (this.connected || isAudio) ? palette.accent : 'rgba(148, 163, 184, 0.45)';
+-    ctx.lineWidth = isAudio ? 1.6 : 1.2;
++    ctx.strokeStyle = (this.connected || isAudio) ? palette.accent : 'rgba(182, 192, 206, 0.36)';
++    ctx.lineWidth = isAudio ? 1.5 : 1.15;
+     ctx.stroke();
+ 
+     ctx.beginPath();
+-    ctx.arc(center.x, center.y, 2.4, 0, Math.PI * 2);
+-    ctx.fillStyle = this.connected ? palette.accent : '#020617';
++    ctx.arc(center.x, center.y, 2.2, 0, Math.PI * 2);
++    ctx.fillStyle = this.connected ? palette.accent : '#06080c';
+     ctx.fill();
+     ctx.restore();
+ }
+@@ -538,18 +704,18 @@ function drawOutput(ctx) {
+     const panel = this.parentModule || this.parent;
+     const palette = getPulvisPalette(panel);
+     const center = this.center;
+-    const sz = 12;
++    const sz = 11.5;
+ 
+     ctx.save();
+-    ctx.fillStyle = hexToRgba(palette.accent, 0.24);
++    ctx.fillStyle = hexToRgba(palette.accent, 0.18);
+     fillRoundedPath(ctx, center.x - sz / 2, center.y - sz / 2, sz, sz, 3);
+     ctx.strokeStyle = palette.accent;
+-    ctx.lineWidth = 1.6;
++    ctx.lineWidth = 1.4;
+     strokeRoundedPath(ctx, center.x - sz / 2, center.y - sz / 2, sz, sz, 3);
+ 
+     ctx.beginPath();
+-    ctx.arc(center.x, center.y, 2.6, 0, Math.PI * 2);
+-    ctx.fillStyle = this.connected ? '#ffffff' : '#050811';
++    ctx.arc(center.x, center.y, 2.4, 0, Math.PI * 2);
++    ctx.fillStyle = this.connected ? '#f8fafc' : '#080b10';
+     ctx.fill();
+     ctx.restore();
+ }
+@@ -565,72 +731,82 @@ function drawButtonIncDec(ctx) {
+             : palette.controlBg;
+     fillRoundedPath(ctx, this.x, this.y, this.width, h, 3.5);
+ 
+-    ctx.strokeStyle = palette.controlBorder;
+-    ctx.lineWidth = this.isHovered ? 1.4 : 1.1;
+-    strokeRoundedPath(ctx, this.x, this.y, this.width, h, 3.5);
++    ctx.strokeStyle = this.isHovered ? palette.pillBorderActive : palette.controlBorder;
++    ctx.lineWidth = 1;
++    strokeRoundedPath(ctx, this.x + 0.5, this.y + 0.5, this.width - 1, h - 1, 3.5);
+ 
+-    const arrowColX = this.x + this.width - 13;
+-    ctx.strokeStyle = palette.divider;
++    const arrowColX = this.x + this.width - 11;
++    ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+     ctx.lineWidth = 1;
+     ctx.beginPath();
+-    ctx.moveTo(arrowColX, this.y + 2);
+-    ctx.lineTo(arrowColX, this.y + h - 2);
++    ctx.moveTo(arrowColX + 0.5, this.y + 2.5);
++    ctx.lineTo(arrowColX + 0.5, this.y + h - 2.5);
+     ctx.stroke();
+ 
+     ctx.save();
+     ctx.beginPath();
+-    ctx.rect(this.x + 2, this.y, this.width - 15, h);
++    ctx.rect(this.x + 2, this.y, this.width - 13, h);
+     ctx.clip();
+     ctx.fillStyle = palette.titleText;
+-    ctx.font = `bold 9.5px ${UI_FONT}`;
++    ctx.font = `600 10px ${UI_FONT}`;
+     ctx.textAlign = 'left';
+     ctx.textBaseline = 'middle';
+-    ctx.fillText(this.currentItem ?? '', this.x + 4, this.y + h / 2);
++    ctx.fillText(this.currentItem ?? '', this.x + 4, this.y + h / 2 + 0.3, this.width - 16);
+     ctx.restore();
+ 
+     const ax = arrowColX + 3;
+-    ctx.fillStyle = palette.sectionAccent;
++    ctx.fillStyle = palette.mutedText;
+     ctx.beginPath();
+-    ctx.moveTo(ax + 3.5, this.y + 3);
+-    ctx.lineTo(ax + 7, this.y + 6.5);
+-    ctx.lineTo(ax, this.y + 6.5);
++    ctx.moveTo(ax + 2.5, this.y + 3.5);
++    ctx.lineTo(ax + 5, this.y + 6.8);
++    ctx.lineTo(ax, this.y + 6.8);
+     ctx.closePath();
+     ctx.fill();
+ 
+     ctx.beginPath();
+-    ctx.moveTo(ax, this.y + 9);
+-    ctx.lineTo(ax + 7, this.y + 9);
+-    ctx.lineTo(ax + 3.5, this.y + 12.5);
++    ctx.moveTo(ax, this.y + 9.2);
++    ctx.lineTo(ax + 5, this.y + 9.2);
++    ctx.lineTo(ax + 2.5, this.y + 12.5);
+     ctx.closePath();
+     ctx.fill();
+ 
+     if (this.items?.length > 1) {
+-        const segW = (this.width - 13) / this.items.length;
+-        ctx.fillStyle = palette.sectionAccent;
+-        fillRoundedPath(ctx, this.x + this.currentIndex * segW + 1, this.y + h - 2, Math.max(4, segW - 2), 1.8, 1);
++        const segW = (this.width - 11) / this.items.length;
++        ctx.fillStyle = hexToRgba(palette.sectionAccent, 0.85);
++        fillRoundedPath(ctx, this.x + this.currentIndex * segW + 1.5, this.y + h - 2, Math.max(4, segW - 3), 1.6, 0.8);
+     }
+     ctx.restore();
+ }
+ 
+ function drawButtonText(ctx) {
+     const palette = getPulvisPalette(this.parent);
++    const by = this.y - 1;
++    const bh = this.height + 2;
+     ctx.save();
+     ctx.fillStyle = (this.isActive || this.isPressed)
+         ? palette.controlBgActive
+         : this.isHovered
+             ? palette.controlBgHover
+             : palette.controlBg;
+-    fillRoundedPath(ctx, this.x, this.y, this.width, this.height, 4);
+-
+-    ctx.strokeStyle = palette.sectionAccent;
+-    ctx.lineWidth = (this.isActive || this.isHovered) ? 1.5 : 1.15;
+-    strokeRoundedPath(ctx, this.x, this.y, this.width, this.height, 4);
+-
+-    ctx.fillStyle = '#ffffff';
+-    ctx.font = `bold 9.5px ${UI_FONT}`;
++    fillRoundedPath(ctx, this.x, by, this.width, bh, 4);
++
++    ctx.strokeStyle = (this.isActive || this.isHovered) ? palette.sectionAccent : hexToRgba(palette.sectionAccent, 0.55);
++    ctx.lineWidth = 1.1;
++    strokeRoundedPath(ctx, this.x + 0.5, by + 0.5, this.width - 1, bh - 1, 4);
++
++    // Keep full text on the component model while displaying a crisp, legible button caption.
++    const rawText = this.text || '';
++    const btnText = rawText === 'Сохранить снимок'
++        ? 'Снимок'
++        : rawText === 'Capture snapshot'
++            ? 'Capture'
++            : rawText;
++    const innerW = this.width - 8;
++    ctx.font = `600 10px ${UI_FONT}`;
++    ctx.fillStyle = '#f1f5f9';
+     ctx.textAlign = 'center';
+     ctx.textBaseline = 'middle';
+-    ctx.fillText(this.text || '', this.x + this.width / 2, this.y + this.height / 2, this.width - 4);
++    ctx.fillText(btnText, this.x + this.width / 2, by + bh / 2 + 0.3, innerW);
+     ctx.restore();
+ }
+ 
+@@ -643,35 +819,36 @@ function drawKnob(ctx) {
+     const cy = this.y + r;
+     const span = Math.max(1e-9, this.max - this.min);
+     const norm = Math.max(0, Math.min(1, (this.value - this.min) / span));
++    const active = this.isHovered || this.isDragging;
+ 
+     ctx.save();
+ 
+-    {
+-        const noCv = this.csoundName === 'Seed';
+-        const pillX = this.x + this.width + 2;
+-        const pillY = this.y + 3;
+-        const pillW = noCv ? 42 : 31;
+-        const pillH = 14;
+-        ctx.fillStyle = palette.pillBg;
+-        fillRoundedPath(ctx, pillX, pillY, pillW, pillH, 3);
+-        ctx.strokeStyle = palette.pillBorder;
+-        ctx.lineWidth = 1;
+-        strokeRoundedPath(ctx, pillX, pillY, pillW, pillH, 3);
++    // Recessed matte numeric readout well (calm hairline border, highlights softly on interaction).
++    const noCv = this.csoundName === 'Seed';
++    const pillX = this.x + this.width + 2;
++    const pillY = this.y + 2.5;
++    const pillW = noCv ? 42 : 31;
++    const pillH = 15;
++    ctx.fillStyle = palette.pillBg;
++    fillRoundedPath(ctx, pillX, pillY, pillW, pillH, 3);
++    ctx.strokeStyle = active ? palette.pillBorderActive : palette.pillBorder;
++    ctx.lineWidth = 1;
++    strokeRoundedPath(ctx, pillX + 0.5, pillY + 0.5, pillW - 1, pillH - 1, 3);
+ 
+-        const shortText = formatPulvisKnobValue(this, panel, false);
+-        ctx.fillStyle = palette.valueText;
+-        ctx.font = `bold 9px ${MONO_FONT}`;
+-        ctx.textAlign = 'center';
+-        ctx.textBaseline = 'middle';
+-        ctx.fillText(shortText, pillX + pillW / 2, pillY + pillH / 2 + 0.5);
+-    }
++    const shortText = formatPulvisKnobValue(this, panel, false);
++    ctx.fillStyle = active ? palette.accentSoft : palette.valueText;
++    ctx.font = `600 9.5px ${MONO_FONT}`;
++    ctx.textAlign = 'center';
++    ctx.textBaseline = 'middle';
++    ctx.fillText(shortText, pillX + pillW / 2, pillY + pillH / 2 + 0.4, pillW - 3);
+ 
++    // Knob arc track
+     const aStart = -Math.PI * 1.25;
+     const aEnd = aStart + Math.PI * 1.5;
+     ctx.beginPath();
+     ctx.arc(cx, cy, r + 0.5, aStart, aEnd);
+     ctx.strokeStyle = palette.knobTrack;
+-    ctx.lineWidth = 2.2;
++    ctx.lineWidth = 2;
+     ctx.lineCap = 'round';
+     ctx.stroke();
+ 
+@@ -683,11 +860,23 @@ function drawKnob(ctx) {
+         ctx.beginPath();
+         ctx.arc(cx, cy, r + 0.5, Math.min(aOrigin, aVal), Math.max(aOrigin, aVal));
+         ctx.strokeStyle = palette.knobArc;
+-        ctx.lineWidth = 2.4;
++        ctx.lineWidth = 2.2;
+         ctx.lineCap = 'round';
+         ctx.stroke();
+     }
+ 
++    // Subtle zero-detent pip tucked onto the arc rim (never overlaps the parameter label above).
++    if (this.showZeroIndicator) {
++        const isZero = Math.abs(this.value) < 0.5;
++        const zx = cx + Math.cos(aOrigin) * (r + 0.5);
++        const zy = cy + Math.sin(aOrigin) * (r + 0.5);
++        ctx.beginPath();
++        ctx.arc(zx, zy, isZero ? 1.8 : 1.3, 0, Math.PI * 2);
++        ctx.fillStyle = isZero ? palette.accentSoft : 'rgba(255, 255, 255, 0.28)';
++        ctx.fill();
++    }
++
++    // Machined aluminum rotary cap
+     const capGrad = ctx.createLinearGradient(cx, cy - r, cx, cy + r);
+     capGrad.addColorStop(0, palette.knobCapTop);
+     capGrad.addColorStop(1, palette.knobCapBottom);
+@@ -695,39 +884,24 @@ function drawKnob(ctx) {
+     ctx.arc(cx, cy, r - 2, 0, Math.PI * 2);
+     ctx.fillStyle = capGrad;
+     ctx.fill();
+-    ctx.strokeStyle = this.isHovered || this.isDragging ? palette.accent : 'rgba(148, 163, 184, 0.35)';
++    ctx.strokeStyle = active ? palette.accent : 'rgba(255, 255, 255, 0.16)';
+     ctx.lineWidth = 1;
+     ctx.stroke();
+ 
++    // Pointer line
+     const needleAngle = aVal + Math.PI / 2;
+     ctx.save();
+     ctx.translate(cx, cy);
+     ctx.rotate(needleAngle);
+     ctx.beginPath();
+     ctx.moveTo(0, 1);
+-    ctx.lineTo(0, -r + 2.2);
++    ctx.lineTo(0, -r + 2.4);
+     ctx.strokeStyle = palette.knobNeedle;
+-    ctx.lineWidth = 2;
++    ctx.lineWidth = 1.8;
+     ctx.lineCap = 'round';
+     ctx.stroke();
+     ctx.restore();
+ 
+-    if (this.showZeroIndicator) {
+-        const isZero = Math.abs(this.value) < 0.5;
+-        ctx.save();
+-        ctx.translate(cx, cy);
+-        ctx.rotate(aOrigin + Math.PI / 2);
+-        const ty = -r - 5;
+-        ctx.fillStyle = isZero ? palette.sectionAccent : palette.knobTrack;
+-        ctx.beginPath();
+-        ctx.moveTo(0, ty + 3.5);
+-        ctx.lineTo(-3, ty);
+-        ctx.lineTo(3, ty);
+-        ctx.closePath();
+-        ctx.fill();
+-        ctx.restore();
+-    }
+-
+     ctx.restore();
+ }
+ 
+@@ -735,7 +909,7 @@ function drawTooltip(ctx) {
+     const palette = getPulvisPalette(this.parent);
+     const valueText = formatPulvisKnobValue(this, this.parent, true);
+     ctx.save();
+-    ctx.font = `bold 11.5px ${UI_FONT}`;
++    ctx.font = `600 11px ${UI_FONT}`;
+     ctx.textAlign = 'center';
+     ctx.textBaseline = 'middle';
+     const padding = 9;
+@@ -744,14 +918,14 @@ function drawTooltip(ctx) {
+     const tx = this.x + this.width / 2;
+     const ty = this.y - h - 8;
+ 
+-    ctx.fillStyle = 'rgba(7, 11, 20, 0.96)';
++    ctx.fillStyle = 'rgba(15, 18, 24, 0.96)';
+     fillRoundedPath(ctx, tx - w / 2, ty, w, h, 5);
+-    ctx.strokeStyle = palette.accent;
+-    ctx.lineWidth = 1.3;
+-    strokeRoundedPath(ctx, tx - w / 2, ty, w, h, 5);
++    ctx.strokeStyle = hexToRgba(palette.accent, 0.65);
++    ctx.lineWidth = 1;
++    strokeRoundedPath(ctx, tx - w / 2 + 0.5, ty + 0.5, w - 1, h - 1, 5);
+ 
+-    ctx.fillStyle = '#f8fafc';
+-    ctx.fillText(valueText, tx, ty + h / 2);
++    ctx.fillStyle = '#f1f5f9';
++    ctx.fillText(valueText, tx, ty + h / 2 + 0.3);
+     ctx.restore();
+ }
+ 
+@@ -781,10 +955,11 @@ const drawControl = { Knob: drawKnob, TextLabel: drawTextLabel, ButtonIncDec: dr
+ 
+ function handleDisplay(panel, x, y) {
+     const relX = x - panel.pixelX, relY = y - panel.pixelY;
++    if (panel.parentSystem.locked) return null;
+     if (relX < 10 || relX > 490 || relY < 32 || relY > 90) return null;
+     const controls = panel.pulvisControls;
+     const action = { type: 'component-drag', endDrag() {} };
+-    if (relX >= 354) {
++    if (relX >= 356) {
+         const selector = controls.get('Window');
+         selector.setValue((selector.currentIndex + 1) % selector.items.length);
+     } else if (relY < 52) {
+@@ -797,17 +972,24 @@ function handleDisplay(panel, x, y) {
+             selector.setValue((Math.round(selector.getValue()) + 1) % (controls.has('Wave') ? 4 : 2));
+         }
+     } else {
++        if (panel.pulvisFft) return action;
+         const system = panel.parentSystem;
+         const slot = Math.round(controls.get('Slot')?.getValue());
+         if (slot && !system.csoundEngine.grainSamples.slots.has(slot)) {
+-            if (relY >= 58 && relY <= 78) {
+-                if (relX >= 20 && relX <= 164) loadDemo(system, slot);
+-                if (relX >= 170 && relX <= 314) selectPulvisWav(system, slot);
++            if (relY >= 58 && relY <= 78 && relX >= 101 && relX <= 261) {
++                selectPulvisWav(system, slot);
+             }
+         } else {
+             const knob = controls.get('Position') || controls.get('PhaseWarp');
+             action.handleDrag = worldX => {
+-                knob.setValue(Math.round(127 * (worldX - panel.pixelX - 20) / 320));
++                const pos = Math.max(0, Math.min(1, (worldX - panel.pixelX - 20) / (panel.width - 178)));
++                const frame = system.csoundEngine.state === 'running' && system.csoundEngine.getScopeBuffer(panel.moduleId + ':display');
++                let value = pos;
++                if (panel.jsonName === 'GrainFreeze' && frame?.[5] > 0) {
++                    const age = (frame[4] - pos + 1) % 1;
++                    value = Math.min(1, age / frame[5]);
++                }
++                knob.setValue(Math.round(127 * value));
+                 panel.setDirty(true);
+             };
+             action.handleDrag(x);
+@@ -817,16 +999,6 @@ function handleDisplay(panel, x, y) {
+     return action;
+ }
+ 
+-async function loadDemo(system, slot) {
+-    try {
+-        const response = await fetch(new URL('./pulvis-demo.wav', import.meta.url));
+-        if (!response.ok) throw new Error(localizePulvis({en:'Could not load the demo WAV.', zh:'无法载入示例 WAV。', ru:'Не удалось загрузить демо WAV.'}));
+-        await system.csoundEngine.loadGrainSample(slot, new File([await response.blob()], 'Pulvis-HarmonicPlucks.wav'));
+-    } catch (error) {
+-        system.showNotification(error.message);
+-    }
+-}
+-
+ export function configurePulvisPanel(panel, definition) {
+     panel.jsonName = definition.type;
+     panel.uiLanguage = definition.uiLanguage;
+@@ -868,7 +1040,7 @@ export function configurePulvisPanel(panel, definition) {
+         }
+     }
+     const startDrag = panel.startDrag.bind(panel);
+-    panel.startDrag = (x, y, system) => (!system.locked && handleDisplay(panel, x, y)) || startDrag(x, y, system);
++    panel.startDrag = (x, y, system) => handleDisplay(panel, x, y) || startDrag(x, y, system);
+     panel.draw = function(ctx) {
+         if (!this.dirty || this.pixelX === null || this.pixelY === null) return;
+         ctx.save();
 diff --git a/src/ui/module-menu.css b/src/ui/module-menu.css
-index 5a17c0c..29fcd4e 100644
+index 5a17c0c..dae9c24 100644
 --- a/src/ui/module-menu.css
 +++ b/src/ui/module-menu.css
-@@ -32,9 +32,34 @@
+@@ -17,7 +17,7 @@
+   padding: 9px 9px 12px; border-bottom: 1px solid #47534f;
+   font-size: 15px; font-weight: 650; overflow-wrap: anywhere;
+ }
+-#module-context-menu .module-category { color: #adc3ba; font-size: 12px; font-weight: 450; }
++#module-context-menu .module-category { color: #adc3ba; font-size: 12px; font-weight: 450; white-space: nowrap; flex-shrink: 0; }
+ #module-context-menu .sample-info { color: #c0ccc6; padding: 10px 9px 5px; overflow-wrap: anywhere; }
+ #module-context-menu .module-action, #module-context-menu .module-layers button {
+   box-sizing: border-box; border: 0; border-radius: 6px; color: inherit; background: transparent;
+@@ -32,9 +32,73 @@
  #module-context-menu .module-layers button[aria-pressed=true] { color: #102720; background: #b0dbc7; font-weight: 650; }
  #module-context-menu .destructive { color: #ffb9ab; }
  
@@ -234,8 +1485,49 @@ index 5a17c0c..29fcd4e 100644
 -#module-context-menu .pulvis-about summary { cursor: pointer; font-weight: 600; }
 -#module-context-menu .pulvis-about strong { display: block; margin-top: 8px; }
 -#module-context-menu .pulvis-about p { margin: 4px 0; }
- #module-context-menu .pulvis-language { display: flex; align-items: center; justify-content: space-between; padding: 5px 9px; }
- #module-context-menu .pulvis-language select { font: inherit; }
+-#module-context-menu .pulvis-language { display: flex; align-items: center; justify-content: space-between; padding: 5px 9px; }
+-#module-context-menu .pulvis-language select { font: inherit; }
++#module-context-menu .pulvis-language { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 5px 9px; }
++#module-context-menu .pulvis-language select {
++  font: inherit;
++  padding: 4px 9px;
++  border: 1px solid #50615c;
++  border-radius: 7px;
++  background: #283432;
++  color: #e7efeb;
++  cursor: pointer;
++}
++#module-context-menu .pulvis-language select:hover { background: #31403d; border-color: #6b827b; }
++#module-context-menu .pulvis-language select:focus-visible { outline: 2px solid #aae0cb; outline-offset: -1px; }
++@supports (appearance: base-select) {
++  #module-context-menu .pulvis-language select,
++  #module-context-menu .pulvis-language select::picker(select) {
++    appearance: base-select;
++  }
++  #module-context-menu .pulvis-language select {
++    align-items: center;
++    gap: 6px;
++    padding: 4px 10px;
++    border-radius: 7px;
++  }
++  #module-context-menu .pulvis-language select::picker(select) {
++    margin-top: 4px;
++    padding: 4px;
++    border: 1px solid #50615c;
++    border-radius: 9px;
++    background: #202a29;
++    color: #e7efeb;
++    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
++  }
++  #module-context-menu .pulvis-language select option {
++    padding: 5px 10px;
++    border-radius: 6px;
++    background: transparent;
++    color: #e7efeb;
++  }
++  #module-context-menu .pulvis-language select option:hover { background: #34443f; }
++  #module-context-menu .pulvis-language select option:checked { background: #2d3d38; font-weight: 600; }
++}
 +
 +.pulvis-about-dialog {
 +  position: fixed;

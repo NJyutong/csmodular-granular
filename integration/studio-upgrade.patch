@@ -192,7 +192,7 @@ index 4c182ec..ea4ea0d 100644
          }, 33);   // ~30 Hz
      }
 diff --git a/src/csound/CsoundGenerator.js b/src/csound/CsoundGenerator.js
-index b4977b1..ebc8904 100644
+index b4977b1..251967f 100644
 --- a/src/csound/CsoundGenerator.js
 +++ b/src/csound/CsoundGenerator.js
 @@ -28,6 +28,7 @@ export class CsoundGenerator {
@@ -203,67 +203,99 @@ index b4977b1..ebc8904 100644
          this._scopeTableCounter = 9000;
  
          // ⭐ UDO text cache (invalidation via invalidateUdoCache())
-@@ -453,7 +454,22 @@ export class CsoundGenerator {
+@@ -453,11 +454,26 @@ export class CsoundGenerator {
      }
  
      _generateScopeCode() {
 -        if (this._scopeTables.size === 0) {
-+        // Use the first connected output for each Pulvis display, after its layer's modules have written the bus.
-+        const tables = new Map(this._scopeTables);
+-            return { ftgens: '; no scope tables', voiceTables: '', fxTables: '' };
+-        }
+-
 +        const previous = this.pulvisScopeTables;
 +        this.pulvisScopeTables = new Map();
-+        for (const cable of this._activeCables) {
-+            const panel = cable.fromJack?.parentModule;
-+            const bus = this._cableBusMap[cable.id];
-+            if (!panel?.pulvisControls || bus === undefined || this.pulvisScopeTables.has(panel.moduleId)) continue;
-+            const tableNum = previous.get(panel.moduleId) ?? this._scopeTableCounter++;
-+            this.pulvisScopeTables.set(panel.moduleId, tableNum);
-+            const spectrumKey = panel.moduleId + ':spectrum';
-+            const spectrumTable = previous.get(spectrumKey) ?? this._scopeTableCounter++;
-+            this.pulvisScopeTables.set(spectrumKey, spectrumTable);
-+            tables.set(panel.moduleId, { tableNum, bus, isAudio: true, panel, spectrumTable });
+         const ftgenLines = [];
++        for (const module of this.modules.values()) {
++            const panel = this.getPanelById(module.instanceId);
++            if (!panel?.pulvisControls) continue;
++            const key = panel.moduleId;
++            let display = previous.get(key + ':display');
++            if (display === undefined) {
++                display = this._scopeTableCounter;
++                this._scopeTableCounter += 3;
++            }
++            this.pulvisScopeTables.set(key + ':display', display);
++            this.pulvisScopeTables.set(key, display + 1);
++            this.pulvisScopeTables.set(key + ':spectrum', display + 2);
++            // GrainCore writes the module's post-level output before Zak routing.
++            ftgenLines.push(`giPulvisDisplay_${display} ftgen ${display}, 0, -672, -2, 0`);
++            ftgenLines.push(`giScope_${display + 1} ftgen ${display + 1}, 0, -4097, -2, 0`);
++            ftgenLines.push(`giSpectrum_${display + 2} ftgen ${display + 2}, 0, -1025, -2, 0`);
 +        }
-+        if (tables.size === 0) {
-             return { ftgens: '; no scope tables', voiceTables: '', fxTables: '' };
-         }
- 
-@@ -461,17 +477,17 @@ export class CsoundGenerator {
          const voiceLines = [];
          const fxLines = [];
  
--        for (const [cableId, info] of this._scopeTables) {
-+        for (const [cableId, info] of tables) {
-             ftgenLines.push(`giScope_${info.tableNum} ftgen ${info.tableNum}, 0, 4096, 2, 0`);
- 
-             const cable = this._activeCables.find(c => c.id === cableId);
--            const layer = cable?.fromJack?.parentModule?.layer || 'voice';
-+            const layer = info.panel?.layer || cable?.fromJack?.parentModule?.layer || 'voice';
- 
-             const lines = [];
- 
-             // k-rate phasor: за 4096 k-блоков проходит 0..1
-             // krate = sr/ksmps, поэтому частота = (sr/ksmps) / 4096
--            lines.push(`aScopeIdx_${info.tableNum} phasor (sr / ksmps) / 4096`);
-+            lines.push(`aScopeIdx_${info.tableNum} phasor ${info.panel ? "sr" : "(sr / ksmps)"} / 4096`);
- 
-             if (info.isAudio) {
-                 lines.push(`aScopeSig_${info.tableNum} zar ${info.bus}`);
-@@ -481,6 +497,14 @@ export class CsoundGenerator {
-                 lines.push(`tablew kScopeSig_${info.tableNum}, k(aScopeIdx_${info.tableNum}), ${info.tableNum}, 1`);
-             }
- 
-+            if (info.spectrumTable) {
-+                // 2048-point Hann FFT: one amplitude per bin, including DC and Nyquist.
-+                const spectrum = info.spectrumTable;
-+                ftgenLines.push(`giSpectrum_${spectrum} ftgen ${spectrum}, 0, -1025, -2, 0`);
-+                lines.push(`fSpectrum_${spectrum} pvsanal aScopeSig_${info.tableNum}, 2048, 512, 2048, 1`);
-+                lines.push(`kSpectrum_${spectrum} pvsftw fSpectrum_${spectrum}, giSpectrum_${spectrum}`);
-+            }
-+
-             if (layer === 'fx') fxLines.push(...lines);
-             else voiceLines.push(...lines);
+@@ -647,7 +663,7 @@ export class CsoundGenerator {
+                 // Проверяем, не использует ли этот номер другой кабель (от того же выхода)
+                 const isShared = this._activeCables.some(c => 
+                     c.id !== cable.id && 
+-                    this._cableBusMap[c.id] === busNumber
++                    this._cableBusMap[c.id] === busNumber && this._getCableType(c) === cableType
+                 );
+                 
+                 if (!isShared) {
+@@ -676,6 +692,8 @@ export class CsoundGenerator {
+     clearCables() {
+         this._activeCables = [];
+         this._cableBusMap = {};
++        this._availableAudioBuses = [];
++        this._availableControlBuses = [];
+         this._audioBusCounter = 2;
+         this._controlBusCounter = 2;
+         this._updateZakInit();
+@@ -686,22 +704,14 @@ export class CsoundGenerator {
+      * Обновить zakinit на основе кабелей
+      */
+     _updateZakInit() {
+-        let audioCount = 0;
+-        let controlCount = 0;
+-        
++        // Removing a low-numbered cable leaves higher routed buses in use.
++        this._audioBusCount = 2;
++        this._controlBusCount = 2;
+         for (const cable of this._activeCables) {
+-            const cableType = this._getCableType(cable);
+-            if (cableType === 'audio') {
+-                audioCount++;
+-            } else if (cableType === 'control') {
+-                controlCount++;
+-            }
++            const end = this._cableBusMap[cable.id] + 1;
++            if (this._getCableType(cable) === 'audio') this._audioBusCount = Math.max(this._audioBusCount, end);
++            else this._controlBusCount = Math.max(this._controlBusCount, end);
          }
-@@ -1446,6 +1470,7 @@ export class CsoundGenerator {
+-        
+-        this._audioBusCount = 2 + audioCount;
+-        this._controlBusCount = 2 + controlCount;
+-        
+-        //console.log(`🎛️ zakinit: audio=${this._audioBusCount} (2 + ${audioCount}), control=${this._controlBusCount} (2 + ${controlCount})`);
+     }
+     
+     _getCableType(cable) {
+@@ -1185,6 +1195,8 @@ export class CsoundGenerator {
+             ...inletBuses.map(String),
+             ...outletBuses.map(String),
+         ];
++        const display = this.pulvisScopeTables.get(panel?.moduleId + ':display');
++        if (display !== undefined) allArgs.push(String(display));
+         const callLine = `${moduleName} ${allArgs.join(', ')}`;
+ 
+         // ⭐ 7. Конвертеры для обычных кабелей (как раньше)
+@@ -1443,9 +1455,12 @@ export class CsoundGenerator {
+         this._cableBusMap = {};
+         this._audioBusCounter = 2;
+         this._controlBusCounter = 2;
++        this._availableAudioBuses = [];
++        this._availableControlBuses = [];
          this._audioBusCount = 2;
          this._controlBusCount = 2;
          this._scopeTables.clear();
@@ -333,7 +365,7 @@ index 304fc75..3f5c058 100644
        e.preventDefault();
        return;
 diff --git a/src/ui/ContextMenu.js b/src/ui/ContextMenu.js
-index 281bc9f..e5c7712 100644
+index 281bc9f..7f015e7 100644
 --- a/src/ui/ContextMenu.js
 +++ b/src/ui/ContextMenu.js
 @@ -4,7 +4,7 @@ import { PANEL_GRID_WIDTH } from '../constants.js';
@@ -350,7 +382,7 @@ index 281bc9f..e5c7712 100644
              `;
              const libraryDisplayName = entry.meta?.displayNameI18n
 -                ? localize(entry.meta.displayNameI18n, getUiLanguage())
-+                ? localize(entry.meta.displayNameI18n, libName === 'pulvis' ? getPulvisLanguage() : getUiLanguage())
++                ? localize(entry.meta.displayNameI18n, 'en')
                  : entry.meta?.displayName || libName;
              const label = document.createElement('span');
              label.textContent = `${icon} ${libraryDisplayName}`;
@@ -359,12 +391,12 @@ index 281bc9f..e5c7712 100644
          const { name, description } = moduleEntry;
          const displayName = moduleEntry.displayNameI18n
 -            ? localize(moduleEntry.displayNameI18n, getUiLanguage())
-+            ? localize(moduleEntry.displayNameI18n, libName === 'pulvis' ? getPulvisLanguage() : getUiLanguage())
++            ? localize(moduleEntry.displayNameI18n, 'en')
              : moduleEntry.displayName || description?.displayName || name;
          const isUser = this.libraryGroups[libName]?.source === 'user';
  
 diff --git a/src/ui/ModuleContextMenu.js b/src/ui/ModuleContextMenu.js
-index 0485eda..a4cd90f 100644
+index 0485eda..dde3b70 100644
 --- a/src/ui/ModuleContextMenu.js
 +++ b/src/ui/ModuleContextMenu.js
 @@ -1,8 +1,9 @@
@@ -392,7 +424,7 @@ index 0485eda..a4cd90f 100644
      this.currentModule = module;
      this.updateMenuContent();
  
-@@ -42,6 +44,87 @@ export class ModuleContextMenu {
+@@ -42,6 +44,95 @@ export class ModuleContextMenu {
      }
    }
  
@@ -474,13 +506,21 @@ index 0485eda..a4cd90f 100644
 +      this.menuElement.querySelector('.pulvis-language select').focus();
 +    };
 +    label.append(select);
-+    this.menuElement.append(about, label);
++    const panel = this.currentModule;
++    const viewLabel = panel.pulvisFft
++        ? { en: 'Show source', zh: '显示音源', ru: 'Показать источник' }
++        : { en: 'Show left-channel spectrum', zh: '显示左声道频谱', ru: 'Показать спектр левого канала' };
++    const view = this.createMenuItem(this.t(viewLabel), () => {
++      panel.pulvisFft = !panel.pulvisFft;
++      panel.setDirty(true);
++    });
++    this.menuElement.append(about, label, view);
 +  }
 +
    updateMenuContent() {
      if (!this.currentModule) return;
  
-@@ -49,8 +132,12 @@ export class ModuleContextMenu {
+@@ -49,8 +140,12 @@ export class ModuleContextMenu {
  
      // === ЗАГОЛОВОК ===
      this.menuElement.appendChild(this.createHeader());
@@ -494,7 +534,7 @@ index 0485eda..a4cd90f 100644
        const slotControl = this.currentModule.components.find(c => String(c.id) === '14');
        const slot = Math.max(1, Math.min(8, Math.round(slotControl?.value ?? 1)));
        const sample = this.system.csoundEngine.grainSamples.slots.get(slot);
-@@ -61,33 +148,16 @@ export class ModuleContextMenu {
+@@ -61,33 +156,16 @@ export class ModuleContextMenu {
          zh: `采样槽 ${slot}：${sample?.name || '空'} · 仅保留在本次会话 · 立体声 WAV 使用左声道`,
          ru: `Слот ${slot}: ${sample?.name || 'пусто'} · только на время сеанса · у стерео WAV используется левый канал`,
        };
@@ -531,7 +571,7 @@ index 0485eda..a4cd90f 100644
        }));
      }
  
-@@ -95,10 +165,10 @@ export class ModuleContextMenu {
+@@ -95,10 +173,10 @@ export class ModuleContextMenu {
      const layerSection = document.createElement('div');
      layerSection.className = 'module-layers';
      const layerTitle = document.createElement('span');
@@ -544,7 +584,7 @@ index 0485eda..a4cd90f 100644
        const button = document.createElement('button');
        button.textContent = label;
        button.setAttribute('aria-pressed', String(current === layer));
-@@ -121,7 +191,7 @@ export class ModuleContextMenu {
+@@ -121,7 +199,7 @@ export class ModuleContextMenu {
                  color: #aaa;
                  font-size: 10px;
              `;
@@ -553,7 +593,7 @@ index 0485eda..a4cd90f 100644
          colorSection.appendChild(colorTitle);
  
          if (!this.colorPicker) {
-@@ -130,7 +200,7 @@ export class ModuleContextMenu {
+@@ -130,7 +208,7 @@ export class ModuleContextMenu {
                  rows: 4,
                  cellSize: 14,
                  showReset: true,
@@ -562,7 +602,7 @@ index 0485eda..a4cd90f 100644
                  onSelect: (color) => this.changePanelColor(color),
                  onReset: () => this.resetPanelColor(),
              });
-@@ -143,6 +213,8 @@ export class ModuleContextMenu {
+@@ -143,6 +221,8 @@ export class ModuleContextMenu {
  
          }
  
@@ -571,7 +611,7 @@ index 0485eda..a4cd90f 100644
          this.colorPicker.setColor(this.currentModule.customColor);
          this.menuElement.appendChild(colorSection);
      }
-@@ -151,7 +223,7 @@ export class ModuleContextMenu {
+@@ -151,7 +231,7 @@ export class ModuleContextMenu {
  
      this.menuElement.appendChild(
        this.createMenuItem(
@@ -580,7 +620,7 @@ index 0485eda..a4cd90f 100644
          () => this.deleteModule(),
          'destructive',
        ),
-@@ -166,7 +238,7 @@ export class ModuleContextMenu {
+@@ -166,7 +246,7 @@ export class ModuleContextMenu {
      const header = document.createElement('div');
      header.className = 'module-menu-title';
      const title = document.createElement('span');
@@ -589,7 +629,7 @@ index 0485eda..a4cd90f 100644
  
      // ⭐ Категория (справа, серым) — вместо дублирующего jsonName
      const category = document.createElement('span');
-@@ -190,10 +262,10 @@ export class ModuleContextMenu {
+@@ -190,10 +270,10 @@ export class ModuleContextMenu {
                sample: { en: 'Sample', zh: '采样', ru: 'Сэмплы' },
                osc: { en: 'Oscillator', zh: '振荡器', ru: 'Осциллятор' },
            };
@@ -603,7 +643,7 @@ index 0485eda..a4cd90f 100644
    }
  
    // ============================================================
-@@ -215,7 +287,7 @@ export class ModuleContextMenu {
+@@ -215,7 +295,7 @@ export class ModuleContextMenu {
  
    setLayer(newLayer) {
      if (this.system?.locked) {
@@ -612,7 +652,7 @@ index 0485eda..a4cd90f 100644
        return;
      }
      if (!this.currentModule) return;
-@@ -225,8 +297,8 @@ export class ModuleContextMenu {
+@@ -225,8 +305,8 @@ export class ModuleContextMenu {
  
      const cables = this.system.patchManager.findCablesByModule(this.currentModule.moduleId);
      if (cables.length > 0) {
@@ -623,7 +663,7 @@ index 0485eda..a4cd90f 100644
          en: `Module "${this.currentModule.title}" has ${cables.length} cable(s). Switching to ${layerNames[newLayer]} will remove them. Continue?`,
          zh: `模块“${this.currentModule.title}”有 ${cables.length} 条连线。切换到 ${layerNames[newLayer]} 层将删除这些连线。继续吗？`,
          ru: `У модуля «${this.currentModule.title}» кабелей: ${cables.length}. При смене слоя на ${layerNames[newLayer]} они будут удалены. Продолжить?`,
-@@ -320,7 +392,7 @@ export class ModuleContextMenu {
+@@ -320,7 +400,7 @@ export class ModuleContextMenu {
          this.system._fxDirty = true;
      }
      this.system.forceRedraw?.();
@@ -632,7 +672,7 @@ index 0485eda..a4cd90f 100644
  
      setTimeout(() => {
        this._changingColor = false;
-@@ -338,7 +410,7 @@ export class ModuleContextMenu {
+@@ -338,7 +418,7 @@ export class ModuleContextMenu {
      this.currentModule.setDirty?.(true);
      this.system.forceRedraw?.();
  
@@ -641,7 +681,7 @@ index 0485eda..a4cd90f 100644
  
      setTimeout(() => {
        this._changingColor = false;
-@@ -351,7 +423,7 @@ export class ModuleContextMenu {
+@@ -351,7 +431,7 @@ export class ModuleContextMenu {
  
    deleteModule() {
        if (this.system?.locked) {
@@ -651,16 +691,64 @@ index 0485eda..a4cd90f 100644
        }
        if (!this.currentModule) return;
 diff --git a/src/ui/module-menu.css b/src/ui/module-menu.css
-index d00a5ca..29fcd4e 100644
+index d00a5ca..dae9c24 100644
 --- a/src/ui/module-menu.css
 +++ b/src/ui/module-menu.css
-@@ -31,3 +31,35 @@
+@@ -17,7 +17,7 @@
+   padding: 9px 9px 12px; border-bottom: 1px solid #47534f;
+   font-size: 15px; font-weight: 650; overflow-wrap: anywhere;
+ }
+-#module-context-menu .module-category { color: #adc3ba; font-size: 12px; font-weight: 450; }
++#module-context-menu .module-category { color: #adc3ba; font-size: 12px; font-weight: 450; white-space: nowrap; flex-shrink: 0; }
+ #module-context-menu .sample-info { color: #c0ccc6; padding: 10px 9px 5px; overflow-wrap: anywhere; }
+ #module-context-menu .module-action, #module-context-menu .module-layers button {
+   box-sizing: border-box; border: 0; border-radius: 6px; color: inherit; background: transparent;
+@@ -31,3 +31,74 @@
  #module-context-menu .module-layers button { padding: 5px 9px; }
  #module-context-menu .module-layers button[aria-pressed=true] { color: #102720; background: #b0dbc7; font-weight: 650; }
  #module-context-menu .destructive { color: #ffb9ab; }
 +
-+#module-context-menu .pulvis-language { display: flex; align-items: center; justify-content: space-between; padding: 5px 9px; }
-+#module-context-menu .pulvis-language select { font: inherit; }
++#module-context-menu .pulvis-language { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 5px 9px; }
++#module-context-menu .pulvis-language select {
++  font: inherit;
++  padding: 4px 9px;
++  border: 1px solid #50615c;
++  border-radius: 7px;
++  background: #283432;
++  color: #e7efeb;
++  cursor: pointer;
++}
++#module-context-menu .pulvis-language select:hover { background: #31403d; border-color: #6b827b; }
++#module-context-menu .pulvis-language select:focus-visible { outline: 2px solid #aae0cb; outline-offset: -1px; }
++@supports (appearance: base-select) {
++  #module-context-menu .pulvis-language select,
++  #module-context-menu .pulvis-language select::picker(select) {
++    appearance: base-select;
++  }
++  #module-context-menu .pulvis-language select {
++    align-items: center;
++    gap: 6px;
++    padding: 4px 10px;
++    border-radius: 7px;
++  }
++  #module-context-menu .pulvis-language select::picker(select) {
++    margin-top: 4px;
++    padding: 4px;
++    border: 1px solid #50615c;
++    border-radius: 9px;
++    background: #202a29;
++    color: #e7efeb;
++    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
++  }
++  #module-context-menu .pulvis-language select option {
++    padding: 5px 10px;
++    border-radius: 6px;
++    background: transparent;
++    color: #e7efeb;
++  }
++  #module-context-menu .pulvis-language select option:hover { background: #34443f; }
++  #module-context-menu .pulvis-language select option:checked { background: #2d3d38; font-weight: 600; }
++}
 +
 +.pulvis-about-dialog {
 +  position: fixed;

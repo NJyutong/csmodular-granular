@@ -8,13 +8,16 @@
 
 <p align="center">
   版本 0.0.5 ·
-  <a href="https://github.com/NJyutong/csmodular-pulvis/releases/download/v0.0.5/Pulvis-0.0.5-windows-x64.exe">Windows x64 安装程序</a> ·
+  <a href="https://github.com/NJyutong/csmodular-pulvis/releases/download/v0.0.5/Pulvis-0.0.5-windows-x64.exe">Windows x64</a> ·
+  <a href="https://github.com/NJyutong/csmodular-pulvis/releases/download/v0.0.5/Pulvis-0.0.5-windows-arm64.exe">Windows ARM64</a> ·
+  <a href="https://github.com/NJyutong/csmodular-pulvis/releases/download/v0.0.5/Pulvis-0.0.5-macos-arm64.pkg">macOS（Apple 芯片）</a> ·
+  <a href="https://github.com/NJyutong/csmodular-pulvis/releases/download/v0.0.5/Pulvis-0.0.5-macos-x64.pkg">macOS（Intel 芯片）</a> ·
   <a href="https://github.com/NJyutong/csmodular-pulvis/releases/download/v0.0.5/Pulvis-0.0.5-linux-x64.deb">Linux x64 (.deb)</a> ·
   <a href="https://github.com/NJyutong/csmodular-pulvis/releases/download/v0.0.5/Pulvis-0.0.5-source.zip">源码包 ZIP</a> ·
   <a href="https://github.com/NJyutong/csmodular-pulvis/releases/download/v0.0.5/SHA256SUMS.txt">SHA-256 校验</a>
 </p>
 
-<p align="center"><img src="assets/pulvis-social-preview.png" width="760" alt="微粒颗粒合成插件库预览图"></p>
+<p align="center"><img src="assets/pulvis-header-zh-CN.png" width="760" alt="微粒颗粒合成插件库预览图"></p>
 
 ## 包含模块
 
@@ -24,31 +27,41 @@
 
 三个模块共用原创 64 声部 Csound 颗粒引擎，配备实时波形与频谱显示、可叠加控制率 CV 调制插孔，并支持简体中文、俄语和英语三种界面语言。
 
+播放时，颗粒振荡器显示载波和输出波形，颗粒冻结显示录音或已捕捉的快照，颗粒采样显示所选槽位的 WAV。移动的光点标出活动颗粒的读取位置，以及它们在右侧包络曲线上的进度。
+
 ## 安装与卸载
 
 > 请先安装 **CsModular 0.1.5** 宿主程序，安装插件前请先关闭 CsModular。
 
-### Windows（x64）
+### Windows（x64 / ARM64 独立安装包）
 
-1. 下载 [Pulvis-0.0.5-windows-x64.exe](https://github.com/NJyutong/csmodular-pulvis/releases/download/v0.0.5/Pulvis-0.0.5-windows-x64.exe)（可用 [SHA256SUMS.txt](https://github.com/NJyutong/csmodular-pulvis/releases/download/v0.0.5/SHA256SUMS.txt) 校验文件）。
+1. 按电脑架构下载对应安装向导（可用 [SHA256SUMS.txt](https://github.com/NJyutong/csmodular-pulvis/releases/download/v0.0.5/SHA256SUMS.txt) 校验文件）：
+   - **Windows x64（Intel / AMD）：** [Pulvis-0.0.5-windows-x64.exe](https://github.com/NJyutong/csmodular-pulvis/releases/download/v0.0.5/Pulvis-0.0.5-windows-x64.exe)
+   - **Windows ARM64：** [Pulvis-0.0.5-windows-arm64.exe](https://github.com/NJyutong/csmodular-pulvis/releases/download/v0.0.5/Pulvis-0.0.5-windows-arm64.exe)
 2. 运行安装向导，选择 CsModular 宿主中的 `libraries/pulvis` 目录。
 3. 直接打开 CsModular —— **Pulvis** 插件会自动出现在模块列表中。
 4. **卸载：** 在 Windows“已安装的应用”中卸载，或运行插件目录内的 `unins000.exe`。
 
+### macOS（Apple 芯片 / Intel 芯片独立安装包）
+
+1. 按 Mac 芯片型号下载原生 `.pkg` 安装包：
+   - **Apple 芯片（M1 / M2 / M3 / M4）：** [Pulvis-0.0.5-macos-arm64.pkg](https://github.com/NJyutong/csmodular-pulvis/releases/download/v0.0.5/Pulvis-0.0.5-macos-arm64.pkg)
+   - **Intel 芯片：** [Pulvis-0.0.5-macos-x64.pkg](https://github.com/NJyutong/csmodular-pulvis/releases/download/v0.0.5/Pulvis-0.0.5-macos-x64.pkg)
+2. 双击 `.pkg`（首次如遇未签名提示可右键选择 **打开**），按 macOS 标准安装向导完成安装。若 CsModular 位于 `/Applications/CsModular.app`，插件会自动注册。
+   - 若 CsModular 安装在自定义路径，可在终端运行 `pulvis-install /你的/CsModular.app路径`。
+3. 打开 CsModular —— **Pulvis** 插件会自动出现在模块列表中。
+4. **卸载：** 在终端运行 `pulvis-install auto-uninstall`（或 `pulvis-install uninstall /你的/CsModular.app路径`）。
+
 ### Linux（x64 Debian / Ubuntu）
 
-1. 下载 [Pulvis-0.0.5-linux-x64.deb](https://github.com/NJyutong/csmodular-pulvis/releases/download/v0.0.5/Pulvis-0.0.5-linux-x64.deb)。
-2. 安装安装器应用：
+1. 下载 [Pulvis-0.0.5-linux-x64.deb](https://github.com/NJyutong/csmodular-pulvis/releases/download/v0.0.5/Pulvis-0.0.5-linux-x64.deb)（标准原生 Debian 包，无 WebView、GTK 或 WebKit 依赖）。
+2. 使用 `apt` 安装：
    ```sh
    sudo apt install ./Pulvis-0.0.5-linux-x64.deb
    ```
-3. 从应用菜单打开 **Pulvis Installer**，选择 CsModular 宿主的 `libraries` 目录完成安装。
-4. 打开 CsModular —— **Pulvis** 插件会自动出现在模块列表中。
-5. **卸载：** 先在 **Pulvis Installer** 中卸载插件，再按需执行 `sudo apt remove pulvis-installer`。
-
-### macOS
-
-macOS 原生安装包暂未发布。
+   系统目录下的 CsModular 会自动检测并完成注册；如宿主在自定义路径，可运行 `pulvis-install /你的/csmodular/libraries路径`。
+3. 打开 CsModular —— **Pulvis** 插件会自动出现在模块列表中。
+4. **卸载：** 运行 `sudo apt remove pulvis` 即可自动清理已注册的宿主插件。
 
 *旧版升级提示：* 若之前安装过旧版 `granular` 目录，安装器会自动迁移为 `pulvis`，旧工程也能继续正常打开。
 
@@ -57,18 +70,21 @@ macOS 原生安装包暂未发布。
 1. 打开 **CsModular**，按空格键（或右键空白画布）打开模块列表，即可看到自动添加的 **Pulvis** 库（包含 `Pulvis Grain Freeze`、`Pulvis Grain Sample`、`Pulvis Grain Osc`）。
 2. **立刻发声：** 放入 **微粒 · 颗粒振荡器**，将右下角 `左` / `右` 输出接到 **Outs2** 的左右输入，调低音量后点击 **▶** 播放。
 3. **体验示例工程：** 通过宿主加载按钮打开 `pulvis-demo.json`（位于宿主 `patches` 目录），即可直接试听 **颗粒振荡器 → 颗粒冻结 → Outs2**，旁边还放好了待导入 WAV 的 **颗粒采样**。
-4. **冻结实时声音（颗粒冻结）：** 接入音频输入并录音后，将 `冻结` 切为 **冻结**，点击 **捕捉快照** 并将 `播放来源` 切至 **快照**，即可保留当前声音纹理并继续录入新音频。
+4. **冻结实时声音（颗粒冻结）：** 接入音频输入并录音后，将 `冻结` 切为 **冻结**，点击 **捕捉快照** 并将 `播放来源` 切至 **快照**，即可播放这段声音。将录音切回 **录入** 后，仍可播放之前的快照。
 5. **导入自己的 WAV（颗粒采样）：** 点击顶部 `#1`–`#8` 槽位（或调节 `采样槽` 旋钮），在空槽中直接点击 **导入 WAV…** 按钮（或右键模块 → **导入 WAV**），再将左右输出接到 **Outs2**。
 
 ### 模块右键菜单（右键点击模块标题栏）
 
+- 右键模块标题栏，选择 **显示左声道频谱**。要切回振荡器波形、冻结模块的录音或快照、或当前 WAV 的波形，再次右键选择 **显示音源**。每个模块可以单独切换。
 - **语言：** 一键切换所有微粒面板与模块菜单为 **简体中文**、**Русский**、**English** 或 **跟随系统**（偏好保存在本机）。宿主主模块浏览器保持英文以与宿主界面一致。
 - **面板颜色：** 提供 32 种哑光配色自定义模块外观，点击 **↺ 跟随主题** 即可立即恢复默认深灰配色。
 - **关于：** 查看插件版本、项目网址、版权与 MIT 许可证。
 
+如果右键菜单里找不到频谱选项，请确认 CsModular 宿主已包含新版 Pulvis 面板。已发布的 0.0.5 桌面安装包早于这次菜单调整。
+
 ## 参数说明
 
-旋钮和选择器旁的小插孔均为叠加型控制率 CV 输入。所有模块均可在 Voice 和 FX 层使用（注意相连模块需在同一层）。
+旋钮和选择器旁的小插孔均为叠加型控制率 CV 输入。所有模块均可在 Voice 和 FX 层使用（注意相连模块需在同一层）。双击旋钮可恢复默认值，按住 **Shift** 拖动可微调。
 
 | 参数 | 范围 / 作用 | CV = 1 叠加量 |
 |---|---|---|
@@ -95,23 +111,12 @@ macOS 原生安装包暂未发布。
 
 ## WAV 支持与使用提示
 
+- 如果面板有波形却听不到声音，请启动播放、打开 **Outs2** 的输出开关，并沿连线检查左右输入。只接一路时，只有对应声道出声。颗粒采样需要选中已有 WAV 的槽位。颗粒冻结要先录入声音并 **捕捉快照**，才能播放快照。
 - **支持格式：** 采样率 `8–192 kHz`，单声道或立体声（立体声读取左声道），PCM 8/16/24/32 位、IEEE float 32/64 位以及标准 `WAVE_FORMAT_EXTENSIBLE`。不支持 RF64 与大端序 WAV。
 - **大小限制：** 单个 WAV 最大 **256 MiB**、最长 **5 分钟**；单次运行累计最多 **512 MiB** 源文件与 **4,800 万** 解码单声道帧。
-- **会话机制：** 导入的 WAV 在本次运行期间供所有颗粒采样模块共享，停止/播放或重编译均会保留，但**不会**写入工程 JSON 文件——关闭或刷新 CsModular 后请重新导入 WAV。插件不内置演示 WAV，空槽默认静音。
-- **替换样本与快照：** 替换 WAV 会短暂重启音频引擎并清空实时冻结缓冲；冻结快照仅归当前模块私有，重启或重编译后需重新捕捉。
+- **会话机制：** 导入的 WAV 在本次运行期间供所有颗粒采样模块共享，停止后再次播放仍会保留，但**不会**写入工程 JSON 文件——关闭或刷新 CsModular 后请重新导入 WAV。插件不内置演示 WAV，空槽默认静音。
+- **替换样本与快照：** 替换 WAV 会短暂重启音频引擎并清空实时冻结缓冲；冻结快照仅归当前模块私有，音频引擎重启后需重新捕捉。
 - **性能建议：** 如复杂工程出现声音断续，可适当降低 **颗粒/秒**、**粒长 ms** 或减少同时运行的颗粒模块数量。
-
-## 开发者与源码安装
-
-如果你在 CsModular 源码环境中开发，可下载 [源码包 ZIP](https://github.com/NJyutong/csmodular-pulvis/releases/download/v0.0.5/Pulvis-0.0.5-source.zip) 或克隆本仓库后执行：
-
-```sh
-node scripts/build-modules.mjs
-node scripts/install.mjs <CsModular 宿主源码路径>
-```
-
-技术文档：
-- [宿主集成说明](docs/INTEGRATION.md) · [项目目录结构](docs/PROJECT_STRUCTURE.md) · [构建与清理](docs/BUILDING.md) · [测试指南](docs/TESTING.md) · [来源与许可说明](SOURCES.md)
 
 ## 许可证
 

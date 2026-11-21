@@ -1,0 +1,555 @@
+diff --git a/src/csound/CsoundGenerator.js b/src/csound/CsoundGenerator.js
+index ebc8904..251967f 100644
+--- a/src/csound/CsoundGenerator.js
++++ b/src/csound/CsoundGenerator.js
+@@ -454,40 +454,40 @@ export class CsoundGenerator {
+     }
+ 
+     _generateScopeCode() {
+-        // Use the first connected output for each Pulvis display, after its layer's modules have written the bus.
+-        const tables = new Map(this._scopeTables);
+         const previous = this.pulvisScopeTables;
+         this.pulvisScopeTables = new Map();
+-        for (const cable of this._activeCables) {
+-            const panel = cable.fromJack?.parentModule;
+-            const bus = this._cableBusMap[cable.id];
+-            if (!panel?.pulvisControls || bus === undefined || this.pulvisScopeTables.has(panel.moduleId)) continue;
+-            const tableNum = previous.get(panel.moduleId) ?? this._scopeTableCounter++;
+-            this.pulvisScopeTables.set(panel.moduleId, tableNum);
+-            const spectrumKey = panel.moduleId + ':spectrum';
+-            const spectrumTable = previous.get(spectrumKey) ?? this._scopeTableCounter++;
+-            this.pulvisScopeTables.set(spectrumKey, spectrumTable);
+-            tables.set(panel.moduleId, { tableNum, bus, isAudio: true, panel, spectrumTable });
+-        }
+-        if (tables.size === 0) {
+-            return { ftgens: '; no scope tables', voiceTables: '', fxTables: '' };
+-        }
+-
+         const ftgenLines = [];
++        for (const module of this.modules.values()) {
++            const panel = this.getPanelById(module.instanceId);
++            if (!panel?.pulvisControls) continue;
++            const key = panel.moduleId;
++            let display = previous.get(key + ':display');
++            if (display === undefined) {
++                display = this._scopeTableCounter;
++                this._scopeTableCounter += 3;
++            }
++            this.pulvisScopeTables.set(key + ':display', display);
++            this.pulvisScopeTables.set(key, display + 1);
++            this.pulvisScopeTables.set(key + ':spectrum', display + 2);
++            // GrainCore writes the module's post-level output before Zak routing.
++            ftgenLines.push(`giPulvisDisplay_${display} ftgen ${display}, 0, -672, -2, 0`);
++            ftgenLines.push(`giScope_${display + 1} ftgen ${display + 1}, 0, -4097, -2, 0`);
++            ftgenLines.push(`giSpectrum_${display + 2} ftgen ${display + 2}, 0, -1025, -2, 0`);
++        }
+         const voiceLines = [];
+         const fxLines = [];
+ 
+-        for (const [cableId, info] of tables) {
++        for (const [cableId, info] of this._scopeTables) {
+             ftgenLines.push(`giScope_${info.tableNum} ftgen ${info.tableNum}, 0, 4096, 2, 0`);
+ 
+             const cable = this._activeCables.find(c => c.id === cableId);
+-            const layer = info.panel?.layer || cable?.fromJack?.parentModule?.layer || 'voice';
++            const layer = cable?.fromJack?.parentModule?.layer || 'voice';
+ 
+             const lines = [];
+ 
+             // k-rate phasor: за 4096 k-блоков проходит 0..1
+             // krate = sr/ksmps, поэтому частота = (sr/ksmps) / 4096
+-            lines.push(`aScopeIdx_${info.tableNum} phasor ${info.panel ? "sr" : "(sr / ksmps)"} / 4096`);
++            lines.push(`aScopeIdx_${info.tableNum} phasor (sr / ksmps) / 4096`);
+ 
+             if (info.isAudio) {
+                 lines.push(`aScopeSig_${info.tableNum} zar ${info.bus}`);
+@@ -497,14 +497,6 @@ export class CsoundGenerator {
+                 lines.push(`tablew kScopeSig_${info.tableNum}, k(aScopeIdx_${info.tableNum}), ${info.tableNum}, 1`);
+             }
+ 
+-            if (info.spectrumTable) {
+-                // 2048-point Hann FFT: one amplitude per bin, including DC and Nyquist.
+-                const spectrum = info.spectrumTable;
+-                ftgenLines.push(`giSpectrum_${spectrum} ftgen ${spectrum}, 0, -1025, -2, 0`);
+-                lines.push(`fSpectrum_${spectrum} pvsanal aScopeSig_${info.tableNum}, 2048, 512, 2048, 1`);
+-                lines.push(`kSpectrum_${spectrum} pvsftw fSpectrum_${spectrum}, giSpectrum_${spectrum}`);
+-            }
+-
+             if (layer === 'fx') fxLines.push(...lines);
+             else voiceLines.push(...lines);
+         }
+@@ -671,7 +663,7 @@ export class CsoundGenerator {
+                 // Проверяем, не использует ли этот номер другой кабель (от того же выхода)
+                 const isShared = this._activeCables.some(c => 
+                     c.id !== cable.id && 
+-                    this._cableBusMap[c.id] === busNumber
++                    this._cableBusMap[c.id] === busNumber && this._getCableType(c) === cableType
+                 );
+                 
+                 if (!isShared) {
+@@ -700,6 +692,8 @@ export class CsoundGenerator {
+     clearCables() {
+         this._activeCables = [];
+         this._cableBusMap = {};
++        this._availableAudioBuses = [];
++        this._availableControlBuses = [];
+         this._audioBusCounter = 2;
+         this._controlBusCounter = 2;
+         this._updateZakInit();
+@@ -710,22 +704,14 @@ export class CsoundGenerator {
+      * Обновить zakinit на основе кабелей
+      */
+     _updateZakInit() {
+-        let audioCount = 0;
+-        let controlCount = 0;
+-        
++        // Removing a low-numbered cable leaves higher routed buses in use.
++        this._audioBusCount = 2;
++        this._controlBusCount = 2;
+         for (const cable of this._activeCables) {
+-            const cableType = this._getCableType(cable);
+-            if (cableType === 'audio') {
+-                audioCount++;
+-            } else if (cableType === 'control') {
+-                controlCount++;
+-            }
++            const end = this._cableBusMap[cable.id] + 1;
++            if (this._getCableType(cable) === 'audio') this._audioBusCount = Math.max(this._audioBusCount, end);
++            else this._controlBusCount = Math.max(this._controlBusCount, end);
+         }
+-        
+-        this._audioBusCount = 2 + audioCount;
+-        this._controlBusCount = 2 + controlCount;
+-        
+-        //console.log(`🎛️ zakinit: audio=${this._audioBusCount} (2 + ${audioCount}), control=${this._controlBusCount} (2 + ${controlCount})`);
+     }
+     
+     _getCableType(cable) {
+@@ -1209,6 +1195,8 @@ export class CsoundGenerator {
+             ...inletBuses.map(String),
+             ...outletBuses.map(String),
+         ];
++        const display = this.pulvisScopeTables.get(panel?.moduleId + ':display');
++        if (display !== undefined) allArgs.push(String(display));
+         const callLine = `${moduleName} ${allArgs.join(', ')}`;
+ 
+         // ⭐ 7. Конвертеры для обычных кабелей (как раньше)
+@@ -1467,6 +1455,8 @@ export class CsoundGenerator {
+         this._cableBusMap = {};
+         this._audioBusCounter = 2;
+         this._controlBusCounter = 2;
++        this._availableAudioBuses = [];
++        this._availableControlBuses = [];
+         this._audioBusCount = 2;
+         this._controlBusCount = 2;
+         this._scopeTables.clear();
+diff --git a/src/ui/ModuleContextMenu.js b/src/ui/ModuleContextMenu.js
+index ad002e2..dde3b70 100644
+--- a/src/ui/ModuleContextMenu.js
++++ b/src/ui/ModuleContextMenu.js
+@@ -122,7 +122,15 @@ export class ModuleContextMenu {
+       this.menuElement.querySelector('.pulvis-language select').focus();
+     };
+     label.append(select);
+-    this.menuElement.append(about, label);
++    const panel = this.currentModule;
++    const viewLabel = panel.pulvisFft
++        ? { en: 'Show source', zh: '显示音源', ru: 'Показать источник' }
++        : { en: 'Show left-channel spectrum', zh: '显示左声道频谱', ru: 'Показать спектр левого канала' };
++    const view = this.createMenuItem(this.t(viewLabel), () => {
++      panel.pulvisFft = !panel.pulvisFft;
++      panel.setDirty(true);
++    });
++    this.menuElement.append(about, label, view);
+   }
+ 
+   updateMenuContent() {
+diff --git a/src/ui/PulvisPanel.js b/src/ui/PulvisPanel.js
+index f6e5f84..99861b2 100644
+--- a/src/ui/PulvisPanel.js
++++ b/src/ui/PulvisPanel.js
+@@ -239,13 +239,6 @@ export function formatPulvisKnobValue(knob, panel, detailed = false) {
+     return knob.min >= 0 && knob.max <= 1 ? v.toFixed(2) : String(Math.round(v));
+ }
+ 
+-function evaluateWindowEnvelope(winIdx, t01) {
+-    const p = Math.max(0, Math.min(1, t01));
+-    if (winIdx === 1) return 1 - Math.abs(2 * p - 1);
+-    if (winIdx === 2) return 0.42 - 0.5 * Math.cos(2 * Math.PI * p) + 0.08 * Math.cos(4 * Math.PI * p);
+-    return 0.5 - 0.5 * Math.cos(2 * Math.PI * p);
+-}
+-
+ function readPanelVal(panel, id, fallback = 0) {
+     const c = panel.components?.find(item => String(item.id) === String(id));
+     if (!c) return fallback;
+@@ -253,55 +246,98 @@ function readPanelVal(panel, id, fallback = 0) {
+     return Number.isFinite(Number(v)) ? Number(v) : fallback;
+ }
+ 
+-// Display the magnitude bins produced by Csound on a logarithmic frequency axis.
+-function drawSpectrum(ctx, bins, x, y, width, height, palette, label) {
+-    const minHz = 40, maxHz = 20000, nyquist = 24000;
+-    const xAt = hz => x + Math.log(hz / minHz) / Math.log(maxHz / minHz) * width;
+-    const floorY = y + height - 9;
+-    ctx.save();
+-    ctx.font = `600 9px ${MONO_FONT}`;
+-    ctx.textAlign = 'left';
++// Read-only plots. Every signal, marker and window value comes from the module's Csound tables.
++function trace(ctx, points, x, width, yAt, color, lineWidth = 1.3) {
++    ctx.beginPath();
++    for (let i = 0; i < points; i++) {
++        const px = x + i * width / (points - 1);
++        const py = yAt(i);
++        if (i) ctx.lineTo(px, py);
++        else ctx.moveTo(px, py);
++    }
++    ctx.strokeStyle = color;
++    ctx.lineWidth = lineWidth;
++    ctx.stroke();
++}
++
++function drawSpectrum(ctx, bins, rate, x, y, width, height, palette) {
++    const binHz = rate / (2 * (bins.length - 1));
++    const minHz = binHz, maxHz = Math.min(20000, rate / 2);
++    const ratio = maxHz / minHz;
++    const bottom = y + height - 9;
++    ctx.font = `500 8px ${MONO_FONT}`;
++    ctx.textAlign = 'center';
+     ctx.textBaseline = 'bottom';
+-    ctx.fillStyle = palette.mutedText;
+-    ctx.fillText(label, x, y + 7, width);
+-    for (const [hz, tick] of [[100, '100'], [1000, '1k'], [10000, '10k']]) {
+-        const tx = Math.round(xAt(hz)) + 0.5;
+-        ctx.strokeStyle = palette.oledGrid;
+-        ctx.lineWidth = 1;
+-        ctx.beginPath();
+-        ctx.moveTo(tx, y + 8);
+-        ctx.lineTo(tx, floorY);
+-        ctx.stroke();
+-        ctx.textAlign = 'center';
++    for (const [hz, tick] of [[100,'100'],[1000,'1k'],[10000,'10k']]) {
++        const tx = x + width * Math.log(hz / minHz) / Math.log(ratio);
++        ctx.fillStyle = palette.oledGrid;
++        ctx.fillRect(tx, y, 1, bottom - y);
++        ctx.fillStyle = palette.mutedText;
+         ctx.fillText(tick, tx, y + height + 1);
+     }
+-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.07)';
+-    ctx.beginPath();
+-    ctx.moveTo(x, floorY + 0.5);
+-    ctx.lineTo(x + width, floorY + 0.5);
+-    ctx.stroke();
++    // Interpolate sparse bass bins, retain the largest measured bin in each treble pixel.
++    trace(ctx, width, x, width, i => {
++        const bin = ratio ** (i / (width - 1));
++        const first = Math.floor(bin);
++        const end = Math.min(bins.length - 1, Math.floor(ratio ** ((i + 1) / (width - 1))));
++        let peak = bins[first] + (bin - first) * (bins[Math.min(first + 1, bins.length - 1)] - bins[first]);
++        for (let j = first + 1; j <= end; j++) peak = Math.max(peak, bins[j]);
++        const db = 20 * Math.log10(Math.max(peak, 0.00001));
++        return bottom - Math.max(0, Math.min(1, (db + 72) / 72)) * (bottom - y);
++    }, palette.accentSoft);
++}
+ 
+-    if (bins?.length > 1) {
+-        const count = 32;
+-        const binHz = nyquist / (bins.length - 1);
+-        const barW = Math.max(1.5, width / count - 1.2);
+-        const barGrad = ctx.createLinearGradient(0, y + 8, 0, floorY);
+-        barGrad.addColorStop(0, palette.accentSoft);
+-        barGrad.addColorStop(1, hexToRgba(palette.accent, 0.48));
+-        ctx.fillStyle = barGrad;
++function drawSource(ctx, frame, output, mode, x, y, w, h, palette) {
++    const osc = mode === 'GrainOsc', live = mode === 'GrainFreeze';
++    const mid = y + h / 2;
++    const yAt = value => mid - Math.max(-1, Math.min(1, value)) * (h / 2 - 2);
++    const wrap = value => value - Math.floor(value);
++    const reverse = frame[8] >= 0.5;
++    const phaseAt = t => wrap((reverse ? -2 : 2) * t);
++    const carrier = phase => frame[16 + Math.floor(phase * 192) % 192];
++    if (osc) {
++        trace(ctx, w, x, w, i => yAt(carrier(phaseAt(i / (w - 1)))), palette.accentSoft);
++        if (output?.length >= 4097) {
++            const head = Math.round(output[4096]) % 4096;
++            const period = frame[12] / (220 * 2 ** (frame[10] / 12));
++            const span = Math.min(4095, Math.round(2 * period));
++            trace(ctx, w, x, w, i => yAt(output[(head + 4095 - span + Math.round(i * span / (w - 1))) % 4096]),
++                hexToRgba(palette.accent, 0.8), 1);
++        }
++    } else {
++        const count = live ? 192 : Math.min(192, frame[14]);
++        ctx.fillStyle = hexToRgba(palette.accent, 0.58);
+         for (let i = 0; i < count; i++) {
+-            const first = Math.max(1, Math.round(minHz * (maxHz / minHz) ** (i / count) / binHz));
+-            const end = Math.max(first + 1, Math.round(minHz * (maxHz / minHz) ** ((i + 1) / count) / binHz));
+-            let peak = 0;
+-            for (let bin = first; bin < end; bin++) peak = Math.max(peak, bins[bin]);
+-            const level = Math.max(0, Math.min(1, (20 * Math.log10(peak) + 72) / 72));
+-            const barHeight = level * (floorY - y - 8);
+-            if (barHeight > 0.4) {
+-                ctx.fillRect(x + i * width / count, floorY - barHeight, barW, barHeight);
+-            }
++            const top = yAt(frame[16 + i]);
++            const bottom = yAt(live ? -frame[16 + i] : frame[465 + i]);
++            ctx.fillRect(x + i * w / 192, top, w / 192 + 0.3, Math.max(1, bottom - top));
++        }
++        const pos = live ? wrap(frame[4] - frame[2] * frame[5]) : frame[2];
++        const radius = frame[3] * (live ? frame[5] : 1);
++        ctx.fillStyle = hexToRgba(palette.accent, 0.13);
++        for (const shift of live ? [-1, 0, 1] : [0]) {
++            const lo = Math.max(0, pos + shift - radius);
++            const hi = Math.min(1, pos + shift + radius);
++            if (hi > lo) ctx.fillRect(x + lo * w, y, (hi - lo) * w, h);
++        }
++        ctx.fillStyle = palette.accentSoft;
++        ctx.fillRect(x + pos * w, y, 1, h);
++        if (live) {
++            ctx.fillStyle = '#f8f8f8';
++            ctx.fillRect(x + frame[4] * w, y, 1.5, h);
+         }
+     }
+-    ctx.restore();
++    for (let i = 0; i < frame[1]; i++) {
++        const pos = frame[208 + 3 * i];
++        if (pos < 0) continue;
++        const amp = frame[210 + 3 * i];
++        const px = osc ? phaseAt(pos / 2) / 2 : pos;
++        const dotY = osc ? yAt(carrier(pos)) : mid;
++        ctx.fillStyle = palette.accentSoft;
++        ctx.beginPath();
++        ctx.arc(x + px * w, dotY, 1.3 + 1.8 * amp, 0, 2 * Math.PI);
++        ctx.fill();
++    }
+ }
+ 
+ function drawPulvisStudioChassisAndOled(panel, ctx, palette) {
+@@ -314,11 +350,10 @@ function drawPulvisStudioChassisAndOled(panel, ctx, palette) {
+ 
+     const engine = panel.parentSystem.csoundEngine;
+     const tr = (en, zh, ru) => localize({ en, zh, ru }, lang);
+-    const density = readPanelVal(panel, 1, 12);
+-    const sizeMs = readPanelVal(panel, 2, 80);
+-    const winIdx = Math.max(0, Math.min(2, Math.round(readPanelVal(panel, 7, 0))));
+-    const spreadNorm = Math.max(0, Math.min(1, readPanelVal(panel, 9, 64) / 127));
+-    const overlap = ((density * sizeMs) / 1000).toFixed(1);
++    const running = engine.state === 'running' && !engine.isRecompiling;
++    const data = running && engine.getScopeBuffer(panel.moduleId + ':display');
++    const frame = data?.[0] === 1 ? data : null;
++    const winIdx = frame ? frame[7] : Math.round(readPanelVal(panel, 7));
+ 
+     ctx.save();
+ 
+@@ -367,6 +402,8 @@ function drawPulvisStudioChassisAndOled(panel, ctx, palette) {
+     ctx.textBaseline = 'middle';
+     ctx.fillText(panel.title, px + 26, py + 15, w - 40);
+ 
++    const fft = Boolean(panel.pulvisFft);
++
+     // 3. Recessed Full-Width OLED Display (x = 10..490, y = 32..90)
+     const ox = px + 10;
+     const oy = py + 32;
+@@ -409,7 +446,7 @@ function drawPulvisStudioChassisAndOled(panel, ctx, palette) {
+     const scopeY = oy + 20;
+     const scopeW = envX - scopeX - 14;
+     const scopeH = oh - 26;
+-    const scopeMidY = scopeY + scopeH / 2;
++
+     const activeSlot = Math.max(1, Math.min(8, Math.round(readPanelVal(panel, 14, 1))));
+     const slotsMap = engine.grainSamples.slots;
+     const activeEntry = slotsMap.get(activeSlot);
+@@ -439,24 +476,33 @@ function drawPulvisStudioChassisAndOled(panel, ctx, palette) {
+         ctx.textAlign = 'right';
+         ctx.textBaseline = 'middle';
+         ctx.fillStyle = activeEntry ? palette.valueText : palette.mutedText;
+-        ctx.fillText(activeEntry?.name || tr('Empty', '空槽', 'Пусто'), scopeX + scopeW, oy + 11, scopeW - 176);
++        const sampleInfo = frame && frame[659] === activeSlot && activeEntry
++            ? `${activeEntry.name} · ${frame[657].toFixed(2)}s · ${(frame[658] / 1000).toFixed(1)}k`
++            : activeEntry?.name || tr('Empty', '空槽', 'Пусто');
++        ctx.fillText(sampleInfo, scopeX + scopeW, oy + 11, scopeW - 172);
+     } else {
+-        const source = modName === 'GrainOsc'
+-            ? formatPulvisKnobValue(panel.pulvisControls.get('Wave'), panel, true)
+-            : [panel.pulvisControls.get('Freeze').currentItem, panel.pulvisControls.get('Source').currentItem].join(' · ');
++        const isOsc = modName === 'GrainOsc';
++        const source = isOsc
++            ? formatPulvisKnobValue(frame ? {csoundName:'Wave', value:frame[659]} : panel.pulvisControls.get('Wave'), panel)
++            : frame ? (frame[11] ? tr('Snapshot', '快照', 'Снимок') : tr('Live', '实时', 'Вход'))
++                : panel.pulvisControls.get('Source').currentItem;
+         ctx.font = `600 10px ${UI_FONT}`;
+         ctx.fillStyle = palette.accentSoft;
+         ctx.textAlign = 'left';
+         ctx.textBaseline = 'middle';
+-        ctx.fillText(source, scopeX, oy + 11, scopeW - 110);
+-        ctx.font = `600 9.5px ${MONO_FONT}`;
+-        ctx.fillStyle = palette.valueText;
+-        ctx.textAlign = 'right';
+-        ctx.fillText(modName === 'GrainOsc' ? pitchToNoteAndHz(readPanelVal(panel, 5)).hz
+-            : formatPulvisKnobValue(panel.pulvisControls.get('Position'), panel, true), scopeX + scopeW, oy + 11, 140);
++        const pitch = frame && pitchToNoteAndHz(frame[10]);
++        const detail = isOsc && frame ? ` · ${pitch.note} ${pitch.hz} · ${frame[659] ? [24,12,6,3,1][frame[660]] : 1}H` : '';
++        ctx.fillText(source + detail, scopeX, oy + 11, scopeW * 0.56);
++        if (frame) {
++            const state = frame[9] >= 0.5 ? tr('Hold', '锁定', 'Удерж.')
++                : isOsc ? tr('Warp', '扭曲', 'Изгиб') : tr('Record', '录入', 'Запись');
++            ctx.textAlign = 'right';
++            ctx.fillText(`${state} · ${Math.round(frame[2] * 100)}% ${frame[8] ? '◀' : '▶'}`,
++                scopeX + scopeW, oy + 11, scopeW * 0.44);
++        }
+     }
+ 
+-    if (isSample && !activeEntry) {
++    if (isSample && !activeEntry && !fft) {
+         const btnW = 160;
+         const btnX = scopeX + Math.round((scopeW - btnW) / 2);
+         const label = tr('Open WAV…', '导入 WAV…', 'Открыть WAV…');
+@@ -471,53 +517,21 @@ function drawPulvisStudioChassisAndOled(panel, ctx, palette) {
+         ctx.textBaseline = 'middle';
+         ctx.fillText(label, btnX + btnW / 2, scopeY + 16.5, btnW - 12);
+     } else {
+-        const waveWidth = Math.floor(scopeW / 2) - 4;
+-        const specX = scopeX + waveWidth + 10;
+-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
+-        ctx.lineWidth = 1;
+-        ctx.beginPath();
+-        ctx.moveTo(scopeX + waveWidth + 4.5, scopeY + 1);
+-        ctx.lineTo(scopeX + waveWidth + 4.5, scopeY + scopeH - 1);
+-        ctx.stroke();
+-
+-        const spectrum = engine.state === 'running' && engine.getScopeBuffer(panel.moduleId + ':spectrum');
+-        drawSpectrum(ctx, spectrum, specX, scopeY, scopeW - (specX - scopeX), scopeH,
+-            palette, tr('Spectrum · Hz', '频谱 · Hz', 'Спектр · Гц'));
+-        const buffer = engine.state === 'running' && engine.getScopeBuffer(panel.moduleId);
+-        if (buffer?.length) {
+-            ctx.save();
+-            ctx.beginPath();
+-            ctx.moveTo(scopeX, scopeMidY);
+-            for (let i = 0; i < waveWidth; i++) {
+-                const amplitude = Math.max(-1, Math.min(1, buffer[i * 2]));
+-                const y = scopeMidY - amplitude * scopeH * 0.45;
+-                ctx.lineTo(scopeX + i, y);
+-            }
+-            ctx.lineTo(scopeX + waveWidth - 1, scopeMidY);
+-            ctx.closePath();
+-            ctx.fillStyle = hexToRgba(palette.accent, 0.12);
+-            ctx.fill();
+-
+-            ctx.beginPath();
+-            for (let i = 0; i < waveWidth; i++) {
+-                const amplitude = Math.max(-1, Math.min(1, buffer[i * 2]));
+-                const y = scopeMidY - amplitude * scopeH * 0.45;
+-                if (i === 0) ctx.moveTo(scopeX, y);
+-                else ctx.lineTo(scopeX + i, y);
+-            }
+-            ctx.strokeStyle = palette.accent;
+-            ctx.lineWidth = 1.4;
+-            ctx.stroke();
+-            ctx.restore();
++        const bins = frame && fft && engine.getScopeBuffer(panel.moduleId + ':spectrum');
++        if (fft && bins?.length > 1) {
++            drawSpectrum(ctx, bins, frame[12], scopeX, scopeY, scopeW, scopeH, palette);
++        } else if (!fft && frame?.[6] && (!isSample || frame[659] === activeSlot)) {
++            drawSource(ctx, frame, engine.getScopeBuffer(panel.moduleId), modName, scopeX, scopeY, scopeW, scopeH, palette);
+         } else {
++            const status = !running ? (engine.state === 'error' ? tr('Csound error', 'Csound 错误', 'Ошибка Csound')
++                : tr('Csound stopped', 'Csound 已停止', 'Csound остановлен'))
++                : frame && !frame[6] ? tr('No snapshot captured', '尚未捕捉快照', 'Нет снимка')
++                : tr('Waiting for Csound', '等待读取 Csound', 'Ожидание Csound');
+             ctx.fillStyle = palette.mutedText;
+-            ctx.font = `500 9.5px ${UI_FONT}`;
+-            ctx.textAlign = 'left';
++            ctx.font = `500 10px ${UI_FONT}`;
++            ctx.textAlign = 'center';
+             ctx.textBaseline = 'middle';
+-            const status = engine.state === 'running' ? tr('Connect an audio output', '请连接音频输出', 'Подключите выход')
+-                : engine.state === 'error' ? tr('Csound error', 'Csound 错误', 'Ошибка Csound')
+-                : tr('Csound stopped', 'Csound 已停止', 'Csound остановлен');
+-            ctx.fillText(status, scopeX, scopeMidY, waveWidth - 4);
++            ctx.fillText(status, scopeX + scopeW / 2, scopeY + scopeH / 2);
+         }
+     }
+ 
+@@ -541,33 +555,17 @@ function drawPulvisStudioChassisAndOled(panel, ctx, palette) {
+     ctx.fillStyle = palette.accentSoft;
+     ctx.font = `600 9px ${MONO_FONT}`;
+     ctx.textAlign = 'right';
+-    ctx.fillText(`${overlap}× · ${Math.round(spreadNorm * 100)}%`, ex + ew, oy + 11, 64);
+-
+-    ctx.beginPath();
+-    ctx.moveTo(ex, ey + eh);
+-    const eSteps = 36;
+-    for (let i = 0; i <= eSteps; i++) {
+-        const t = i / eSteps;
+-        const amp = evaluateWindowEnvelope(winIdx, t);
+-        ctx.lineTo(ex + t * ew, ey + eh - amp * (eh - 3));
+-    }
+-    ctx.lineTo(ex + ew, ey + eh);
+-    ctx.closePath();
+-    ctx.fillStyle = hexToRgba(palette.accent, 0.14);
+-    ctx.fill();
+-
+-    ctx.beginPath();
+-    for (let i = 0; i <= eSteps; i++) {
+-        const t = i / eSteps;
+-        const amp = evaluateWindowEnvelope(winIdx, t);
+-        const cx = ex + t * ew;
+-        const cy = ey + eh - amp * (eh - 3);
+-        if (i === 0) ctx.moveTo(cx, cy);
+-        else ctx.lineTo(cx, cy);
++    if (frame) {
++        ctx.fillText(`${frame[1]} · ${Math.round(frame[15] * 100)}%`, ex + ew, oy + 11, 64);
++        trace(ctx, 65, ex, ew, i => ey + eh - frame[400 + i] * (eh - 3), palette.accent);
++        ctx.fillStyle = palette.accentSoft;
++        for (let i = 0; i < frame[1]; i++) {
++            const progress = frame[209 + i * 3], amplitude = frame[210 + i * 3];
++            ctx.beginPath();
++            ctx.arc(ex + progress * ew, ey + eh - amplitude * (eh - 3), 2, 0, 2 * Math.PI);
++            ctx.fill();
++        }
+     }
+-    ctx.strokeStyle = palette.accent;
+-    ctx.lineWidth = 1.4;
+-    ctx.stroke();
+ 
+     // 4. Two Side-by-Side Matte Hardware Control Decks (Left: x=10..246, Right: x=254..490, y=96..262)
+     [px + 10, px + 254].forEach((deckX, deckIdx) => {
+@@ -957,6 +955,7 @@ const drawControl = { Knob: drawKnob, TextLabel: drawTextLabel, ButtonIncDec: dr
+ 
+ function handleDisplay(panel, x, y) {
+     const relX = x - panel.pixelX, relY = y - panel.pixelY;
++    if (panel.parentSystem.locked) return null;
+     if (relX < 10 || relX > 490 || relY < 32 || relY > 90) return null;
+     const controls = panel.pulvisControls;
+     const action = { type: 'component-drag', endDrag() {} };
+@@ -973,6 +972,7 @@ function handleDisplay(panel, x, y) {
+             selector.setValue((Math.round(selector.getValue()) + 1) % (controls.has('Wave') ? 4 : 2));
+         }
+     } else {
++        if (panel.pulvisFft) return action;
+         const system = panel.parentSystem;
+         const slot = Math.round(controls.get('Slot')?.getValue());
+         if (slot && !system.csoundEngine.grainSamples.slots.has(slot)) {
+@@ -982,7 +982,14 @@ function handleDisplay(panel, x, y) {
+         } else {
+             const knob = controls.get('Position') || controls.get('PhaseWarp');
+             action.handleDrag = worldX => {
+-                knob.setValue(Math.round(127 * (worldX - panel.pixelX - 20) / 320));
++                const pos = Math.max(0, Math.min(1, (worldX - panel.pixelX - 20) / (panel.width - 178)));
++                const frame = system.csoundEngine.state === 'running' && system.csoundEngine.getScopeBuffer(panel.moduleId + ':display');
++                let value = pos;
++                if (panel.jsonName === 'GrainFreeze' && frame?.[5] > 0) {
++                    const age = (frame[4] - pos + 1) % 1;
++                    value = Math.min(1, age / frame[5]);
++                }
++                knob.setValue(Math.round(127 * value));
+                 panel.setDirty(true);
+             };
+             action.handleDrag(x);
+@@ -1033,7 +1040,7 @@ export function configurePulvisPanel(panel, definition) {
+         }
+     }
+     const startDrag = panel.startDrag.bind(panel);
+-    panel.startDrag = (x, y, system) => (!system.locked && handleDisplay(panel, x, y)) || startDrag(x, y, system);
++    panel.startDrag = (x, y, system) => handleDisplay(panel, x, y) || startDrag(x, y, system);
+     panel.draw = function(ctx) {
+         if (!this.dirty || this.pixelX === null || this.pixelY === null) return;
+         ctx.save();

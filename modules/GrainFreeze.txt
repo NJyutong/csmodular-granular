@@ -1,6 +1,6 @@
 ;@ requires GrainCore.txt
-opcode GrainFreeze, 0, kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk
-    kDensity, kSize, kPosition, kPosJitter, kPitch, kPitchJitter, kWindow, kPan, kSpread, kFreeze, kMix, kLevel, kSeed, kTimeJitter, kReverse, kSource, kFeedback, kCapture, kAudioIn, kDensityIn, kSizeIn, kPositionIn, kPosJitterIn, kPitchIn, kPitchJitterIn, kWindowIn, kPanIn, kSpreadIn, kFreezeIn, kMixIn, kLevelIn, kTimeJitterIn, kReverseIn, kFeedbackIn, kOutL, kOutR xin
+opcode GrainFreeze, 0, kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkko
+    kDensity, kSize, kPosition, kPosJitter, kPitch, kPitchJitter, kWindow, kPan, kSpread, kFreeze, kMix, kLevel, kSeed, kTimeJitter, kReverse, kSource, kFeedback, kCapture, kAudioIn, kDensityIn, kSizeIn, kPositionIn, kPosJitterIn, kPitchIn, kPitchJitterIn, kWindowIn, kPanIn, kSpreadIn, kFreezeIn, kMixIn, kLevelIn, kTimeJitterIn, kReverseIn, kFeedbackIn, kOutL, kOutR, iDisplay xin
     aDry = 0
     aDry zar kAudioIn
     kDensityCV zkr kDensityIn
@@ -44,7 +44,7 @@ opcode GrainFreeze, 0, kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk
     kSnapshotB = iSnapshotB
     kFrames = iRingFrames
     kRate = sr
-    aWetL, aWetR CMGrainCoreExtended aDry, 1, kTable, kFrames, kRate, kDensity, kSize, kPosition, kPosJitter, kPitch, kPitchJitter, kWindow, kPan, kSpread, kFreeze, kSeed, kTimeJitter, kReverse, kFeedback, kSource, kSnapshotA, kSnapshotB, kCapture
+    aWetL, aWetR CMGrainCoreExtended aDry, 1, kTable, kFrames, kRate, kDensity, kSize, kPosition, kPosJitter, kPitch, kPitchJitter, kWindow, kPan, kSpread, kFreeze, kSeed, kTimeJitter, kReverse, kFeedback, kSource, kSnapshotA, kSnapshotB, kCapture, iDisplay
     kLevel limit kLevel, -24, 12
     kLevel = pow(10, kLevel / 20)
     aLevel interp kLevel
@@ -52,6 +52,13 @@ opcode GrainFreeze, 0, kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk
     aMix interp kMix
     aOutL limit ((1 - aMix) * aDry + aMix * aWetL) * aLevel, -1, 1
     aOutR limit ((1 - aMix) * aDry + aMix * aWetR) * aLevel, -1, 1
-    zaw aOutL, kOutL
-    zaw aOutR, kOutR
+    if iDisplay > 0 then
+        CMPulvisOutputView aOutL, iDisplay
+    endif
+    if kOutL > 1 then
+        zaw aOutL, kOutL
+    endif
+    if kOutR > 1 then
+        zaw aOutR, kOutR
+    endif
 endop

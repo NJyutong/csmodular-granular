@@ -4,6 +4,14 @@
 #ifndef CoreSha256
   #error "CoreSha256 must be provided by the Windows package script"
 #endif
+#ifndef TargetArch
+  #define TargetArch "x64"
+#endif
+#if TargetArch == "arm64"
+  #define AllowedArch "arm64"
+#else
+  #define AllowedArch "x64os"
+#endif
 
 [Setup]
 AppId={{73E7BE16-AD16-4C19-9818-815CE44B7F05}
@@ -20,10 +28,10 @@ DisableWelcomePage=no
 UninstallDisplayName={cm:ProductName} {#AppVersion} - CsModular
 UninstallDisplayIcon={app}\assets\pulvis-icon.png
 PrivilegesRequired=lowest
-ArchitecturesAllowed=x64
-ArchitecturesInstallIn64BitMode=x64
+ArchitecturesAllowed={#AllowedArch}
+ArchitecturesInstallIn64BitMode={#AllowedArch}
 OutputDir=.
-OutputBaseFilename=Pulvis-{#AppVersion}-windows-x64
+OutputBaseFilename=Pulvis-{#AppVersion}-windows-{#TargetArch}
 SetupIconFile=..\src-tauri\icons\icon.ico
 WizardStyle=modern dynamic polar includetitlebar
 WizardImageFile=wizard-image.png
@@ -113,6 +121,9 @@ Source: "..\..\README.zh-CN.md"; DestDir: "{tmp}"; Flags: dontcopy
 Source: "..\..\README.ru.md"; DestDir: "{tmp}"; Flags: dontcopy
 Source: "..\..\LICENSE"; DestDir: "{tmp}"; Flags: dontcopy
 Source: "..\..\assets\pulvis-icon.png"; DestDir: "{tmp}"; Flags: dontcopy
+Source: "..\..\assets\pulvis-social-preview.png"; DestDir: "{tmp}"; Flags: dontcopy
+Source: "..\..\assets\pulvis-header-zh-CN.png"; DestDir: "{tmp}"; Flags: dontcopy
+Source: "..\..\assets\pulvis-header-ru.png"; DestDir: "{tmp}"; Flags: dontcopy
 Source: "..\..\examples\pulvis-demo.json"; DestDir: "{tmp}"; Flags: dontcopy
 Source: "..\..\csound\GrainCore.txt"; DestDir: "{tmp}"; Flags: dontcopy
 Source: "registration.ps1"; DestDir: "{app}"; Flags: ignoreversion
@@ -521,6 +532,9 @@ begin
     ExtractTemporaryFile('README.ru.md');
     ExtractTemporaryFile('LICENSE');
     ExtractTemporaryFile('pulvis-icon.png');
+    ExtractTemporaryFile('pulvis-social-preview.png');
+    ExtractTemporaryFile('pulvis-header-zh-CN.png');
+    ExtractTemporaryFile('pulvis-header-ru.png');
     ExtractTemporaryFile('pulvis-demo.json');
     ExtractTemporaryFile('GrainCore.txt');
     if not DirExists(AppDir) and DirExists(LegacyDir) then begin

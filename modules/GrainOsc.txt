@@ -1,6 +1,6 @@
 ;@ requires GrainCore.txt
-opcode GrainOsc, 0, kkkkkkkkkkkkkkkkkkkkkkkkkkkkkk
-    kDensity, kSize, kPosition, kPosJitter, kPitch, kPitchJitter, kWindow, kPan, kSpread, kFreeze, kLevel, kSeed, kWave, kTimeJitter, kReverse, kDensityIn, kSizeIn, kPositionIn, kPosJitterIn, kPitchIn, kPitchJitterIn, kWindowIn, kPanIn, kSpreadIn, kFreezeIn, kLevelIn, kTimeJitterIn, kReverseIn, kOutL, kOutR xin
+opcode GrainOsc, 0, kkkkkkkkkkkkkkkkkkkkkkkkkkkkkko
+    kDensity, kSize, kPosition, kPosJitter, kPitch, kPitchJitter, kWindow, kPan, kSpread, kFreeze, kLevel, kSeed, kWave, kTimeJitter, kReverse, kDensityIn, kSizeIn, kPositionIn, kPosJitterIn, kPitchIn, kPitchJitterIn, kWindowIn, kPanIn, kSpreadIn, kFreezeIn, kLevelIn, kTimeJitterIn, kReverseIn, kOutL, kOutR, iDisplay xin
     aDry = 0
     kDensityCV zkr kDensityIn
     kDensity = kDensity + kDensityCV * 48
@@ -52,12 +52,21 @@ opcode GrainOsc, 0, kkkkkkkkkkkkkkkkkkkkkkkkkkkkkk
     kTable = iWaveTables[kTableIndex]
     kFrames = iFrames
     kRate = 220 * kFrames
-    aWetL, aWetR CMGrainCoreExtended aDry, 2, kTable, kFrames, kRate, kDensity, kSize, kPosition, kPosJitter, kPitch, kPitchJitter, kWindow, kPan, kSpread, kFreeze, kSeed, kTimeJitter, kReverse, 0, 0, 0, 0, 0
+    aWetL, aWetR CMGrainCoreExtended aDry, 2, kTable, kFrames, kRate, kDensity, kSize, kPosition, kPosJitter, kPitch, kPitchJitter, kWindow, kPan, kSpread, kFreeze, kSeed, kTimeJitter, kReverse, 0, 0, 0, 0, 0, iDisplay
     kLevel limit kLevel, -24, 12
     kLevel = pow(10, kLevel / 20)
     aLevel interp kLevel
     aOutL limit aWetL * aLevel, -1, 1
     aOutR limit aWetR * aLevel, -1, 1
-    zaw aOutL, kOutL
-    zaw aOutR, kOutR
+    if iDisplay > 0 then
+        tablewkt kWave, 659, iDisplay
+        tablewkt kBand, 660, iDisplay
+        CMPulvisOutputView aOutL, iDisplay
+    endif
+    if kOutL > 1 then
+        zaw aOutL, kOutL
+    endif
+    if kOutR > 1 then
+        zaw aOutR, kOutR
+    endif
 endop

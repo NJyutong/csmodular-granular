@@ -2,6 +2,8 @@
 
 权威源码位于 `E:\paper\csmodular-pulvis`（仓库原名 `csmodular-granular`）。CsModular 宿主由上游维护。在宿主接口与兼容检查中参考其 `AGENTS.md`、`docs/PROJECT_STRUCTURE.md` 和实际源码。安装、构建和端到端检查在独立测试宿主上执行。将插件变更及 `integration/csmodular.patch` 提交到插件仓。改动前阅读 `README.md`、`SOURCES.md`、`docs/TESTING.md` 和 [构建说明](docs/BUILDING.md)。
 
+根目录 README 面向安装和使用产品的最终用户。说明怎么安装、开始播放、连接模块和处理常见问题；开发环境、仓库路径、构建测试命令及协作规则放在技术文档中。面板的音源与左声道频谱通过模块右键菜单切换，标题栏右上角留空。
+
 ## 产品和语言
 
 实现并维护 Grain Freeze、Grain Sample、Grain Osc：共用 Csound 引擎、CsModular UI 模块、WAV 文件传递、安装、文档和检查。

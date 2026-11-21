@@ -56,7 +56,9 @@ const expectedFiles = [
     'installer/package.json', 'installer/package-lock.json', 'installer/src-tauri/Cargo.toml',
     'installer/src-tauri/Cargo.lock', 'installer/src-tauri/tauri.conf.json', 'installer/src-tauri/src/lib.rs',
     'installer/windows/pulvis.iss', 'installer/windows/registration.ps1', 'installer/windows/wizard-image.png', 'installer/windows/wizard-small.png',
-    'scripts/build-windows-installer.mjs', 'scripts/build-linux-deb.mjs', 'scripts/build-linux-deb.sh',
+    'installer/macos/pulvis-manage.jxa', 'installer/macos/scripts/postinstall', 'installer/macos/distribution.xml.in',
+    'installer/linux/pulvis-manage.py',
+    'scripts/build-windows-installer.mjs', 'scripts/build-macos-pkg.mjs', 'scripts/build-macos-pkg.sh', 'scripts/build-linux-deb.mjs', 'scripts/build-linux-deb.sh',
     'installer/ui/app.js', 'installer/ui/index.html',
     'scripts/sync-version.mjs', 'scripts/build-icons.py', 'scripts/verify-icons.mjs', 'scripts/check-readmes.mjs',
     'scripts/build-artifacts.mjs', 'scripts/cleanup-build-task.mjs', 'scripts/package-source.mjs',
@@ -66,7 +68,7 @@ const expectedFiles = [
 ];
 expectedFiles.push('SOURCES.md');
 if (!archiveMode) expectedFiles.push('.github/workflows/build-installers.yml', '.github/workflows/quality.yml');
-if (!stageMode) expectedFiles.push('integration/csmodular.patch', 'integration/wav-session-compat.patch', 'integration/studio-upgrade.patch', 'integration/studio-display-update.patch', 'scripts/build-modules.mjs', 'scripts/install.mjs');
+if (!stageMode) expectedFiles.push('integration/csmodular.patch', 'integration/wav-session-compat.patch', 'integration/studio-upgrade.patch', 'integration/studio-display-update.patch', 'integration/studio-release-update.patch', 'integration/studio-live-update.patch', 'integration/display-menu.patch', 'scripts/build-modules.mjs', 'scripts/install.mjs');
 if (!archiveMode && !stageMode) expectedFiles.push('scripts/check.mjs', 'scripts/check-suite.mjs', 'scripts/inventory-artifacts.mjs');
 const hashes = {};
 for (const path of expectedFiles) hashes[path] = digest(await readFile(resolve(root, path)));
@@ -113,7 +115,8 @@ assert.equal(iconCheck.status, 0, `Icon assets pass structural checks: ${iconChe
 const windowsInstaller = (await read('installer/windows/pulvis.iss')).replace(/\r\n/g, '\n');
 for (const item of ['WizardStyle=modern dynamic polar includetitlebar', 'WizardImageFile=wizard-image.png',
     'WizardSmallImageFile=wizard-small.png', 'WizardImageFileDynamicDark=wizard-image.png',
-    'WizardSmallImageFileDynamicDark=wizard-small.png', 'UsePreviousAppDir=yes', 'Flags: dontcopy', 'function PrepareToInstall', 'GetSHA256OfFile']) {
+    'WizardSmallImageFileDynamicDark=wizard-small.png', 'UsePreviousAppDir=yes', 'Flags: dontcopy', 'function PrepareToInstall', 'GetSHA256OfFile',
+    '#if TargetArch == "arm64"', '#define AllowedArch "arm64"', '#define AllowedArch "x64os"', 'ArchitecturesAllowed={#AllowedArch}']) {
     assert(windowsInstaller.includes(item), `Native Windows installer preserves ${item}`);
 }
 for (const item of [
@@ -150,20 +153,37 @@ assert(archiveRules.includes('P*-CROSS-PLATFORM-ACCEPTANCE.md export-ignore')
     'The source archive leaves post-build acceptance records as separate release evidence');
 if (!archiveMode) {
     const workflow = await read('.github/workflows/build-installers.yml');
-    for (const expectedName of ['pulvis-windows-x64-v0.0.5', 'pulvis-linux-x64-v0.0.5', 'pulvis-source-v0.0.5']) {
+    for (const expectedName of [
+        'pulvis-windows-x64-v0.0.5',
+        'pulvis-windows-arm64-v0.0.5',
+        'pulvis-macos-arm64-v0.0.5',
+        'pulvis-macos-x64-v0.0.5',
+        'pulvis-linux-x64-v0.0.5',
+        'pulvis-source-v0.0.5',
+    ]) {
         assert(workflow.includes(expectedName), `CI publishes ${expectedName}`);
     }
     assert(workflow.includes('innosetup-7.1.1-x64.exe'), 'Windows CI pins the native installer compiler');
-    assert(workflow.includes('node scripts/build-windows-installer.mjs'), 'Windows CI builds the native wizard');
+    assert(workflow.includes('node scripts/build-windows-installer.mjs --arch=x64')
+        && workflow.includes('node scripts/build-windows-installer.mjs --arch=arm64'),
+        'Windows CI builds separate x64 and ARM64 installers');
+    assert(workflow.includes('node scripts/build-macos-pkg.mjs --arch=arm64')
+        && workflow.includes('node scripts/build-macos-pkg.mjs --arch=x64')
+        && (await read('scripts/build-macos-pkg.mjs')).includes('Pulvis-${version}-macos-${arch}.pkg'),
+        'macOS CI builds and verifies separate native Apple Silicon (arm64) and Intel (x64) .pkg installers');
     assert(workflow.includes('node scripts/build-linux-deb.mjs')
         && workflow.includes('Build, verify and stage Debian package plus SHA-256')
         && (await read('scripts/build-linux-deb.mjs')).includes('Pulvis-${version}-linux-x64.deb'),
-        'Linux CI builds and verifies the Debian package and its checksum');
+        'Linux CI builds and verifies the native Debian package and its checksum');
+    assert(!workflow.toLowerCase().includes('webkit') && !workflow.toLowerCase().includes('webview'),
+        'CI desktop installers do not require WebKit or WebView');
     assert(workflow.includes('PULVIS_TASK_ROOT') && workflow.includes('cleanup-build-task.mjs')
-        && workflow.includes('Upload Windows build diagnostics') && workflow.includes('Upload Linux build diagnostics'),
+        && workflow.includes('Upload Windows x64 build diagnostics') && workflow.includes('Upload Windows ARM64 build diagnostics')
+        && workflow.includes('Upload Linux build diagnostics')
+        && workflow.includes('Upload macOS Apple Silicon build diagnostics') && workflow.includes('Upload macOS Intel build diagnostics'),
         'CI keeps per-run work until upload, exports failure diagnostics and cleans only the task directory');
-    assert(!workflow.toLowerCase().includes('macos') && !workflow.toLowerCase().includes('appimage'),
-        'CI is limited to the accepted Windows and Linux packages');
+    assert(!workflow.toLowerCase().includes('appimage'),
+        'CI does not create an AppImage package');
     for (const stale of ['CsModular-Granular', '1.1.1']) assert(!workflow.includes(stale), `CI does not retain stale release name ${stale}`);
 }
 

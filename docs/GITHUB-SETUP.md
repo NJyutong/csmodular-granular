@@ -14,16 +14,16 @@ The authenticated account has admin access to `NJyutong/csmodular-granular`. No 
 
 ## About
 
-- Description: `Three Csound granular synthesis modules for the CsModular modular audio workstation.`
+- Description: `Original Csound granular synthesis plugin library for CsModular (Grain Freeze, Grain Sample, Grain Osc) with live source and spectrum views, stereo patching, and English, Chinese and Russian user manuals.`
 - Website: `https://github.com/NJyutong/csmodular-pulvis/releases`
-- Topics: `csound`, `granular-synthesis`, `modular-synthesizer`, `audio-synthesis`, `sound-design`, `audio-plugin`, `tauri`, `rust`
+- Topics: `csound`, `granular-synthesis`, `modular-synthesizer`, `audio-synthesis`, `sound-design`, `audio-plugin`, `csmodular`, `dsp`, `tauri`, `rust`
 - Social preview: upload `assets/pulvis-social-preview.png` (1280 × 640 px).
 
 ## Actions
 
 The repository contains two workflows:
 
-- **Build and verify Pulvis packages**: run manually to build Windows, Linux Debian and source archive artifacts. Each uploaded artifact includes its package and `.sha256` file. Build failure logs upload separately.
+- **Build and verify Pulvis packages**: run manually (or automatically on `main` / `v*` tag push) to build separate Windows x64, Windows ARM64, macOS Apple Silicon (`arm64` `.pkg`), macOS Intel (`x64` `.pkg`), Linux Debian (`x64` `.deb`), and source archive artifacts. Each uploaded artifact includes its package and `.sha256` file. Build failure logs upload separately.
 - **Host compatibility and regression checks**: run manually and fill in the host repository plus the clean-source and installed-UI refs. The previous acceptance refs `10136ca` and `9dbe666` were not found in the public upstream `gleb812/csmodular`; use a host fork or repository that actually contains both accepted snapshots. For a private host repository, add an Actions secret named `HOST_CHECKOUT_TOKEN` with read access. Public repositories need no secret.
 
 ## First release
@@ -31,6 +31,6 @@ The repository contains two workflows:
 - Tag: `v0.0.5`
 - Release title: `Pulvis 0.0.5`
 - Release notes: copy the relevant language section from `release-notes/0.0.5.md`.
-- Attach: `Pulvis-0.0.5-windows-x64.exe`, `Pulvis-0.0.5-linux-x64.deb`, `Pulvis-0.0.5-source.zip`, and `SHA256SUMS.txt`. The individual `.sha256` sidecars may also be attached.
+- Attach: `Pulvis-0.0.5-windows-x64.exe`, `Pulvis-0.0.5-windows-arm64.exe`, `Pulvis-0.0.5-macos-arm64.pkg`, `Pulvis-0.0.5-macos-x64.pkg`, `Pulvis-0.0.5-linux-x64.deb`, `Pulvis-0.0.5-source.zip`, and `SHA256SUMS.txt`. The individual `.sha256` sidecars may also be attached.
 
 The README download URLs already point to these GitHub release asset names. Once the release exists, download each asset from GitHub and verify its SHA-256 against the uploaded manifest before sharing the links.

@@ -11,6 +11,9 @@ const files = ['README.md', 'README.zh-CN.md', 'README.ru.md'];
 const releaseBase = `https://github.com/NJyutong/csmodular-pulvis/releases/download/v${version}/`;
 const releaseNames = [
     `Pulvis-${version}-windows-x64.exe`,
+    `Pulvis-${version}-windows-arm64.exe`,
+    `Pulvis-${version}-macos-arm64.pkg`,
+    `Pulvis-${version}-macos-x64.pkg`,
     `Pulvis-${version}-linux-x64.deb`,
     `Pulvis-${version}-source.zip`,
     'SHA256SUMS.txt',
@@ -33,7 +36,9 @@ for (let index = 0; index < files.length; index++) {
     const markdown = readFileSync(resolve(root, file), 'utf8');
     const localizedName = localizedNames[index];
     assert(markdown.includes(localizedName), `${file} starts with its localized Pulvis name`);
-    for (const url of releaseUrls) assert(markdown.includes(url), `${file} links to ${url}`);
+    for (const name of releaseNames.filter(name => !name.endsWith('-source.zip'))) {
+        assert(markdown.includes(releaseBase + name), `${file} links to ${name}`);
+    }
     assert(markdown.includes(`assets/pulvis-icon.png`), `${file} uses the repository icon`);
     assert.match(markdown, /<img src="assets\/pulvis-icon\.png" width="144" alt="[^"]+">/,
         `${file} presents the repository icon at a compact, readable size`);
@@ -59,7 +64,7 @@ for (let index = 0; index < files.length; index++) {
 
 if (requireReleaseAssets) {
     const releaseDirectory = resolve(root, 'release-assets', version);
-    const packageNames = releaseNames.slice(0, 3);
+    const packageNames = releaseNames.slice(0, -1);
     const expectedRows = [];
     for (const name of packageNames) {
         const packagePath = resolve(releaseDirectory, name);

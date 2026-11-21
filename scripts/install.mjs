@@ -27,7 +27,8 @@ await mkdir(lock);
 let staging;
 const applied = [];
 const studioUpdate = resolve(root, 'integration/studio-upgrade.patch');
-const displayUpdate = resolve(root, 'integration/studio-display-update.patch');
+const liveUpdates = ['display-menu.patch', 'studio-release-update.patch', 'studio-live-update.patch', 'studio-display-update.patch']
+    .map(name => resolve(root, 'integration', name));
 const renderer = '--include=src/ui/PulvisPanel.js';
 function matches(file, flags = []) {
     try { git([...flags, '--check'], file); return true; }
@@ -42,8 +43,17 @@ const undo = [];
 const created = [];
 let preserveBackup = false;
 try {
-    const alreadyInstalled = matches(patch, ['--reverse']);
-    if (!alreadyInstalled && !matches(patch) && !matches(displayUpdate) && !matches(studioUpdate) && !matches(compatibilityUpdate)) {
+    const syncAssets = process.argv.includes('--sync-assets');
+    // A locally maintained host may have its own menus and patch loader. Verify
+    // the full audio/display integration before refreshing only its public assets.
+    const audioDisplay = [renderer, '--include=src/csound/*', '--include=src/ModuleFactory.js'];
+    if (syncAssets && (!matches(patch, ['--reverse', ...audioDisplay])
+        || !matches(resolve(root, 'integration/display-menu.patch'), ['--reverse', '--include=src/ui/ModuleContextMenu.js']))) {
+        throw new Error('The local host audio and display code must be integrated before syncing assets.');
+    }
+    const alreadyInstalled = syncAssets || matches(patch, ['--reverse']);
+    const studioMigration = !alreadyInstalled && liveUpdates.find(file => matches(file));
+    if (!alreadyInstalled && !matches(patch) && !studioMigration && !matches(studioUpdate) && !matches(compatibilityUpdate)) {
         throw new Error('Host integration does not match this checkout. Review integration/csmodular.patch.');
     }
     await directory(join(host, 'public'));
@@ -73,7 +83,7 @@ try {
         merged.modules = [...merged.modules.filter(m => !ids.has(typeof m === 'string' ? m : m?.name)), ...modules.modules];
     }
     files.set(join(target, '_index.json'), JSON.stringify(merged, null, 2) + '\n');
-    for (const path of ['_meta.json', 'README.md', 'README.zh-CN.md', 'README.ru.md', 'SOURCES.md', 'LICENSE', 'assets/pulvis-icon.png']) {
+    for (const path of ['_meta.json', 'README.md', 'README.zh-CN.md', 'README.ru.md', 'SOURCES.md', 'LICENSE', 'assets/pulvis-icon.png', 'assets/pulvis-social-preview.png', 'assets/pulvis-header-zh-CN.png', 'assets/pulvis-header-ru.png']) {
         files.set(join(target, path), await readFile(join(root, path)));
     }
     files.set(join(host, 'public/csound/modules/GrainCore.txt'), await readFile(join(root, 'csound/GrainCore.txt')));
@@ -85,8 +95,8 @@ try {
     if (!alreadyInstalled) {
         if (matches(patch)) {
             apply(patch);
-        } else if (matches(displayUpdate)) {
-            apply(displayUpdate);
+        } else if (studioMigration) {
+            apply(studioMigration);
         } else {
             // Upgrades keep unrelated host edits. Verify the whole integration before publishing.
             if (matches(compatibilityUpdate)) apply(compatibilityUpdate);

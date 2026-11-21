@@ -27,6 +27,7 @@ const INSTALL_FILES: &[&str] = &[
     "README.ru.md",
     "LICENSE",
     "assets/pulvis-icon.png",
+    "assets/pulvis-social-preview.png",
     "examples/pulvis-demo.json",
     MIGRATION_MARKER,
 ];
@@ -68,6 +69,10 @@ const BUNDLED_FILES: &[(&str, &[u8])] = &[
     (
         "assets/pulvis-icon.png",
         include_bytes!("../../../assets/pulvis-icon.png"),
+    ),
+    (
+        "assets/pulvis-social-preview.png",
+        include_bytes!("../../../assets/pulvis-social-preview.png"),
     ),
     (
         "examples/pulvis-demo.json",

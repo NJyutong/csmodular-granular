@@ -192,7 +192,7 @@ for (const name of names) {
     await writeFile(resolve(root, 'modules', `${name}.js`), `export const ${name}Module = ${JSON.stringify(def, null, 4)};\n`);
     const cvControls = moduleControls.filter(([key]) => key !== 'Seed');
     const args = [...params.map(([key]) => `k${key}`), ...(live ? ['kAudioIn'] : []), ...cvControls.map(([key]) => `k${key}In`), 'kOutL', 'kOutR'];
-    const lines = [';@ requires GrainCore.txt', 'opcode ' + name + ', 0, ' + 'k'.repeat(args.length), '    ' + args.join(', ') + ' xin', '    aDry = 0'];
+    const lines = [';@ requires GrainCore.txt', 'opcode ' + name + ', 0, ' + 'k'.repeat(args.length) + 'o', '    ' + args.join(', ') + ', iDisplay xin', '    aDry = 0'];
     if (live) lines.push('    aDry zar kAudioIn');
     for (const [key, , , , , scale] of cvControls) {
         lines.push(`    k${key}CV zkr k${key}In`);
@@ -251,13 +251,18 @@ for (const name of names) {
     const coreExtras = live
         ? 'kReverse, kFeedback, kSource, kSnapshotA, kSnapshotB, kCapture'
         : 'kReverse, 0, 0, 0, 0, 0';
-    lines.push(`    aWetL, aWetR CMGrainCoreExtended aDry, ${live ? 1 : sample ? 0 : 2}, kTable, kFrames, kRate, kDensity, kSize, kPosition, kPosJitter, kPitch, kPitchJitter, kWindow, kPan, kSpread, kFreeze, kSeed, kTimeJitter, ${coreExtras}`,
+    lines.push(`    aWetL, aWetR CMGrainCoreExtended aDry, ${live ? 1 : sample ? 0 : 2}, kTable, kFrames, kRate, kDensity, kSize, kPosition, kPosJitter, kPitch, kPitchJitter, kWindow, kPan, kSpread, kFreeze, kSeed, kTimeJitter, ${coreExtras}, iDisplay`,
         '    kLevel limit kLevel, -24, 12', '    kLevel = pow(10, kLevel / 20)', '    aLevel interp kLevel');
     if (live) lines.push('    kMix limit kMix, 0, 1', '    aMix interp kMix',
         '    aOutL limit ((1 - aMix) * aDry + aMix * aWetL) * aLevel, -1, 1',
         '    aOutR limit ((1 - aMix) * aDry + aMix * aWetR) * aLevel, -1, 1');
     else lines.push('    aOutL limit aWetL * aLevel, -1, 1', '    aOutR limit aWetR * aLevel, -1, 1');
-    lines.push('    zaw aOutL, kOutL', '    zaw aOutR, kOutR', 'endop', '');
+    lines.push('    if iDisplay > 0 then');
+    if (sample) lines.push('        tablewkt kSlot + 1, 659, iDisplay');
+    if (!live && !sample) lines.push('        tablewkt kWave, 659, iDisplay', '        tablewkt kBand, 660, iDisplay');
+    lines.push('        CMPulvisOutputView aOutL, iDisplay', '    endif',
+        '    if kOutL > 1 then', '        zaw aOutL, kOutL', '    endif',
+        '    if kOutR > 1 then', '        zaw aOutR, kOutR', '    endif', 'endop', '');
     await writeFile(resolve(root, 'modules', `${name}.txt`), lines.join('\n'));
 }
 const moduleDisplayNames = {

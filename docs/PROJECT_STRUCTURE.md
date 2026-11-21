@@ -15,6 +15,8 @@ csmodular-pulvis/
 ├── modules/                          Paired JavaScript UI and Csound UDO files
 ├── integration/
 │   ├── csmodular.patch               Host integration changes (UI, HiDPI, Csound tables, WAV, locale)
+│   ├── display-menu.patch            Migrate title-bar view buttons to the module menu
+│   ├── studio-*.patch                Upgrade earlier studio panel integrations
 │   └── wav-session-compat.patch      Upgrade patch for hosts with earlier WAV session integration
 ├── assets/                           Product icon source, PNG/ICO/ICNS icons and social preview
 ├── scripts/install.mjs               Install into a host source checkout
@@ -29,7 +31,7 @@ csmodular-pulvis/
 
 ## Runtime flow
 
-The host loads each JavaScript module definition and its paired Csound wrapper. `src/ui/PulvisPanel.js` renders the matte graphite widescreen (`500 × 300`) hardware panels, polls Csound `giScope_*` / `giSpectrum_*` visualizer tables for live oscilloscope and 2048-point Hann FFT displays, and pairs with `ModuleContextMenu.js` (language, centered About dialog, color swatches + theme reset) while keeping the host `ContextMenu.js` browser in English. The Csound wrappers call `CMGrainCoreExtended` from `csound/GrainCore.txt` and exchange audio through the host's Zak cable buses. Host `instr 1` is the Voice layer; `instr 2` is the FX layer.
+The host loads each JavaScript module definition and its paired Csound wrapper. `src/ui/PulvisPanel.js` renders the matte graphite widescreen (`500 × 300`) hardware panels, uses frames polled by `CsoundEngine.js` from Csound’s per-instance display, waveform and FFT tables for live oscilloscope and 2048-point Hann FFT displays, and pairs with `ModuleContextMenu.js` (source/spectrum selection, language, centered About dialog, color swatches + theme reset) while keeping the host `ContextMenu.js` browser in English. The Csound wrappers call `CMGrainCoreExtended` from `csound/GrainCore.txt` and exchange audio through the host's Zak cable buses. Host `instr 1` is the Voice layer; `instr 2` is the FX layer.
 
 Grain Sample's interface selects a WAV file (via the empty-slot **Open WAV…** button or right-click menu; no demo WAV is bundled), validates its header, and transfers the bytes to Csound's virtual file system. Csound performs file decoding and all grain audio processing.
 

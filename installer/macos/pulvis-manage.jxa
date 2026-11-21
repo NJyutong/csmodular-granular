@@ -1,0 +1,385 @@
+#!/usr/bin/osascript -l JavaScript
+ObjC.import('Foundation');
+ObjC.import('stdlib');
+
+const FM = $.NSFileManager.defaultManager;
+const ENV = $.NSProcessInfo.processInfo.environment;
+const PAYLOAD_ROOT = ObjC.unwrap(ENV.objectForKey('PULVIS_PAYLOAD_DIR')) || '/Library/Application Support/Pulvis/payload';
+const STATE_FILE = '/Library/Application Support/Pulvis/installed-hosts.json';
+const LIBRARY_NAME = 'pulvis';
+const LEGACY_LIBRARY_NAME = 'granular';
+const MIGRATION_MARKER = '_pulvis-library-registration-before-install';
+const MODULE_IDS = ['GrainFreeze', 'GrainSample', 'GrainOsc'];
+const OWNED_FILES = [
+    'modules/GrainFreeze.js',
+    'modules/GrainFreeze.txt',
+    'modules/GrainSample.js',
+    'modules/GrainSample.txt',
+    'modules/GrainOsc.js',
+    'modules/GrainOsc.txt',
+    '_meta.json',
+    'README.md',
+    'README.zh-CN.md',
+    'README.ru.md',
+    'LICENSE',
+    'assets/pulvis-icon.png',
+    'assets/pulvis-social-preview.png',
+    'assets/pulvis-header-zh-CN.png',
+    'assets/pulvis-header-ru.png',
+    'examples/pulvis-demo.json',
+];
+
+function joinPath(...parts) {
+    return parts.filter(Boolean).join('/').replace(/\/+/g, '/');
+}
+
+function dirname(p) {
+    const clean = p.replace(/\/+$/, '');
+    const idx = clean.lastIndexOf('/');
+    return idx <= 0 ? '/' : clean.slice(0, idx);
+}
+
+function basename(p) {
+    const clean = p.replace(/\/+$/, '');
+    const idx = clean.lastIndexOf('/');
+    return idx < 0 ? clean : clean.slice(idx + 1);
+}
+
+function isDir(p) {
+    const isDirRef = Ref();
+    return FM.fileExistsAtPathIsDirectory(p, isDirRef) && isDirRef[0];
+}
+
+function isFile(p) {
+    const isDirRef = Ref();
+    return FM.fileExistsAtPathIsDirectory(p, isDirRef) && !isDirRef[0];
+}
+
+function mkdirp(p) {
+    const err = Ref();
+    if (!FM.createDirectoryAtPathWithIntermediateDirectoriesAttributesError(p, true, $(), err)) {
+        throw new Error('mkdir failed for ' + p + ': ' + ObjC.unwrap(err[0].localizedDescription));
+    }
+}
+
+function readData(p) {
+    const data = $.NSData.dataWithContentsOfFile(p);
+    if (!data || data.isNil()) throw new Error('Cannot read file: ' + p);
+    return data;
+}
+
+function readText(p) {
+    const str = $.NSString.stringWithContentsOfFileEncodingError(p, $.NSUTF8StringEncoding, $());
+    if (!str || str.isNil()) throw new Error('Cannot read UTF-8 text: ' + p);
+    return ObjC.unwrap(str);
+}
+
+function writeDataAtomic(p, nsData) {
+    mkdirp(dirname(p));
+    const err = Ref();
+    if (!nsData.writeToFileOptionsError(p, $.NSDataWritingAtomic, err)) {
+        throw new Error('Cannot write file ' + p + ': ' + ObjC.unwrap(err[0].localizedDescription));
+    }
+}
+
+function writeTextAtomic(p, text) {
+    const nsStr = $.NSString.stringWithString(text);
+    const nsData = nsStr.dataUsingEncoding($.NSUTF8StringEncoding);
+    writeDataAtomic(p, nsData);
+}
+
+function removeFile(p) {
+    if (!isFile(p)) return;
+    const err = Ref();
+    if (!FM.removeItemAtPathError(p, err)) {
+        throw new Error('Cannot remove ' + p + ': ' + ObjC.unwrap(err[0].localizedDescription));
+    }
+}
+
+function removeEmptyDir(p) {
+    if (!isDir(p)) return;
+    const items = FM.contentsOfDirectoryAtPathError(p, $());
+    if (items && !items.isNil() && items.count === 0) {
+        FM.removeItemAtPathError(p, $());
+    }
+}
+
+function movePath(src, dst) {
+    const err = Ref();
+    if (!FM.moveItemAtPathToPathError(src, dst, err)) {
+        throw new Error('Cannot move ' + src + ' to ' + dst + ': ' + ObjC.unwrap(err[0].localizedDescription));
+    }
+}
+
+function dataEquals(a, b) {
+    return a && b && !a.isNil() && !b.isNil() && Boolean(a.isEqualToData(b));
+}
+
+function isLibrariesDir(p) {
+    const idx = joinPath(p, '_index.json');
+    if (!isDir(p) || !isFile(idx)) return false;
+    try {
+        const obj = JSON.parse(readText(idx));
+        return Array.isArray(obj.libraries) && obj.libraries.every(x => typeof x === 'string');
+    } catch (e) {
+        return false;
+    }
+}
+
+function resolveLibrariesDir(raw) {
+    const expanded = ObjC.unwrap($.NSString.stringWithString(raw).stringByExpandingTildeInPath.stringByStandardizingPath);
+    const base = basename(expanded);
+    if ((base === LIBRARY_NAME || base === LEGACY_LIBRARY_NAME) && isLibrariesDir(dirname(expanded))) {
+        return dirname(expanded);
+    }
+    if (isLibrariesDir(expanded)) return expanded;
+    for (const sub of ['Contents/Resources/libraries', 'public/libraries', 'dist/libraries', 'resources/libraries', 'libraries']) {
+        const cand = joinPath(expanded, sub);
+        if (isLibrariesDir(cand)) return cand;
+    }
+    throw new Error('Not a valid CsModular libraries folder (missing valid _index.json): ' + expanded);
+}
+
+function detectHostLibraries() {
+    const candidates = [];
+    for (const key of ['CSMODULAR_HOST_ROOT', 'CSMODULAR_ROOT']) {
+        const val = ObjC.unwrap(ENV.objectForKey(key));
+        if (val) candidates.push(val);
+    }
+    candidates.push('/Applications/CsModular.app', '/Applications/CsModular');
+    const home = ObjC.unwrap(ENV.objectForKey('HOME'));
+    if (home) {
+        candidates.push(
+            joinPath(home, 'Applications/CsModular.app'),
+            joinPath(home, 'Applications/CsModular'),
+            joinPath(home, 'Projects/csmodular-main'),
+            joinPath(home, 'Documents/GitHub/csmodular-main'),
+            joinPath(home, 'Code/csmodular-main')
+        );
+    }
+    const found = [];
+    const seen = new Set();
+    for (const root of candidates) {
+        for (const sub of ['', 'Contents/Resources/libraries', 'public/libraries', 'dist/libraries', 'resources/libraries', 'libraries']) {
+            const cand = sub ? joinPath(root, sub) : root;
+            if (isLibrariesDir(cand)) {
+                const std = ObjC.unwrap($.NSString.stringWithString(cand).stringByStandardizingPath);
+                if (!seen.has(std)) {
+                    seen.add(std);
+                    found.push(std);
+                }
+            }
+        }
+    }
+    return found;
+}
+
+function recordHost(librariesDir, installed) {
+    try {
+        let hosts = [];
+        if (isFile(STATE_FILE)) {
+            hosts = JSON.parse(readText(STATE_FILE));
+            if (!Array.isArray(hosts)) hosts = [];
+        }
+        hosts = hosts.filter(h => h !== librariesDir);
+        if (installed) hosts.push(librariesDir);
+        if (hosts.length) {
+            writeTextAtomic(STATE_FILE, JSON.stringify(hosts, null, 2) + '\n');
+        } else {
+            removeFile(STATE_FILE);
+        }
+    } catch (e) {
+        // Non-root user installs may not have write access to /Library/Application Support/Pulvis
+    }
+}
+
+function installTo(librariesDir) {
+    if (!isLibrariesDir(librariesDir)) throw new Error('Invalid CsModular libraries folder: ' + librariesDir);
+    const pluginDir = joinPath(librariesDir, LIBRARY_NAME);
+    const legacyDir = joinPath(librariesDir, LEGACY_LIBRARY_NAME);
+    const corePath = joinPath(dirname(librariesDir), 'csound/modules/GrainCore.txt');
+    const hostIndexPath = joinPath(librariesDir, '_index.json');
+    const moduleIndexPath = joinPath(pluginDir, '_index.json');
+    const markerPath = joinPath(pluginDir, MIGRATION_MARKER);
+
+    let migrated = false;
+    const backups = new Map();
+    const backup = p => {
+        if (!backups.has(p)) backups.set(p, isFile(p) ? readData(p) : null);
+    };
+
+    try {
+        if (!isDir(pluginDir) && isDir(legacyDir)) {
+            movePath(legacyDir, pluginDir);
+            migrated = true;
+        }
+
+        const hostIndex = JSON.parse(readText(hostIndexPath));
+        let libs = hostIndex.libraries;
+        const hasMarker = isFile(markerPath);
+        const prior = hasMarker
+            ? readText(markerPath).trim()
+            : libs.includes(LIBRARY_NAME)
+                ? LIBRARY_NAME
+                : (libs.includes(LEGACY_LIBRARY_NAME) && !isDir(legacyDir) ? LEGACY_LIBRARY_NAME : 'none');
+
+        const payloadIndex = JSON.parse(readText(joinPath(PAYLOAD_ROOT, '_index.json')));
+        let existingModules = [];
+        if (isFile(moduleIndexPath)) {
+            const existingObj = JSON.parse(readText(moduleIndexPath));
+            if (!Array.isArray(existingObj.modules)) throw new Error('Invalid module index: ' + moduleIndexPath);
+            existingModules = existingObj.modules.filter(m => !MODULE_IDS.includes(typeof m === 'string' ? m : m.name));
+        }
+
+        for (const rel of OWNED_FILES) {
+            const dst = joinPath(pluginDir, rel);
+            backup(dst);
+            writeDataAtomic(dst, readData(joinPath(PAYLOAD_ROOT, rel)));
+        }
+
+        backup(corePath);
+        writeDataAtomic(corePath, readData(joinPath(PAYLOAD_ROOT, 'csound/GrainCore.txt')));
+
+        backup(moduleIndexPath);
+        writeTextAtomic(moduleIndexPath, JSON.stringify({ modules: existingModules.concat(payloadIndex.modules) }, null, 2) + '\n');
+
+        if (!hasMarker) {
+            backup(markerPath);
+            writeTextAtomic(markerPath, prior);
+        }
+
+        if (prior === LEGACY_LIBRARY_NAME) {
+            libs = libs.map(x => x === LEGACY_LIBRARY_NAME ? LIBRARY_NAME : x);
+        }
+        if (!libs.includes(LIBRARY_NAME)) libs.push(LIBRARY_NAME);
+        hostIndex.libraries = libs;
+        backup(hostIndexPath);
+        writeTextAtomic(hostIndexPath, JSON.stringify(hostIndex, null, 2) + '\n');
+
+        recordHost(librariesDir, true);
+        console.log('Installed Pulvis into ' + pluginDir);
+    } catch (err) {
+        for (const [p, old] of backups.entries()) {
+            try {
+                if (old === null) removeFile(p);
+                else writeDataAtomic(p, old);
+            } catch (e) {}
+        }
+        if (migrated && isDir(pluginDir) && !isDir(legacyDir)) {
+            try { movePath(pluginDir, legacyDir); } catch (e) {}
+        }
+        throw err;
+    }
+}
+
+function uninstallFrom(librariesDir) {
+    const pluginDir = joinPath(librariesDir, LIBRARY_NAME);
+    if (!isDir(pluginDir)) {
+        recordHost(librariesDir, false);
+        return;
+    }
+    const legacyDir = joinPath(librariesDir, LEGACY_LIBRARY_NAME);
+    const corePath = joinPath(dirname(librariesDir), 'csound/modules/GrainCore.txt');
+    const hostIndexPath = joinPath(librariesDir, '_index.json');
+    const moduleIndexPath = joinPath(pluginDir, '_index.json');
+    const markerPath = joinPath(pluginDir, MIGRATION_MARKER);
+    const prior = isFile(markerPath) ? readText(markerPath).trim() : 'none';
+
+    let others = [];
+    if (isFile(moduleIndexPath)) {
+        const modObj = JSON.parse(readText(moduleIndexPath));
+        others = (modObj.modules || []).filter(m => !MODULE_IDS.includes(typeof m === 'string' ? m : m.name));
+        if (others.length) {
+            writeTextAtomic(moduleIndexPath, JSON.stringify({ modules: others }, null, 2) + '\n');
+        } else {
+            removeFile(moduleIndexPath);
+        }
+    }
+
+    for (const rel of OWNED_FILES) {
+        if (rel === '_meta.json' && others.length) continue;
+        const target = joinPath(pluginDir, rel);
+        const bundled = joinPath(PAYLOAD_ROOT, rel);
+        if (isFile(target) && (!isFile(bundled) || dataEquals(readData(target), readData(bundled)))) {
+            removeFile(target);
+        }
+    }
+    removeFile(markerPath);
+
+    const bundledCore = joinPath(PAYLOAD_ROOT, 'csound/GrainCore.txt');
+    if (isFile(corePath) && (!isFile(bundledCore) || dataEquals(readData(corePath), readData(bundledCore)))) {
+        removeFile(corePath);
+        removeEmptyDir(dirname(corePath));
+        removeEmptyDir(dirname(dirname(corePath)));
+    }
+
+    for (const sub of ['modules', 'assets', 'examples']) removeEmptyDir(joinPath(pluginDir, sub));
+    removeEmptyDir(pluginDir);
+
+    if (isFile(hostIndexPath)) {
+        const hostIndex = JSON.parse(readText(hostIndexPath));
+        let libs = hostIndex.libraries || [];
+        if (prior === LEGACY_LIBRARY_NAME && others.length) {
+            libs = libs.map(x => x === LIBRARY_NAME ? LEGACY_LIBRARY_NAME : x);
+        } else if (!others.length) {
+            libs = libs.filter(x => x !== LIBRARY_NAME);
+        }
+        hostIndex.libraries = libs;
+        writeTextAtomic(hostIndexPath, JSON.stringify(hostIndex, null, 2) + '\n');
+    }
+
+    if (prior === LEGACY_LIBRARY_NAME && isDir(pluginDir) && !isDir(legacyDir)) {
+        movePath(pluginDir, legacyDir);
+    }
+    recordHost(librariesDir, false);
+    console.log('Removed Pulvis from ' + librariesDir);
+}
+
+function run(argv) {
+    try {
+        if (!argv || argv.length === 0 || argv[0] === '-h' || argv[0] === '--help') {
+            console.log('Usage:');
+            console.log('  pulvis-install <csmodular-app-or-libraries-dir>');
+            console.log('  pulvis-install install <csmodular-app-or-libraries-dir>');
+            console.log('  pulvis-install uninstall <csmodular-app-or-libraries-dir>');
+            console.log('  pulvis-install auto-install');
+            console.log('  pulvis-install auto-uninstall');
+            return;
+        }
+        const cmd = argv[0];
+        if (cmd === 'auto-install') {
+            const hosts = detectHostLibraries();
+            if (hosts.length === 0) {
+                console.log('Pulvis payload installed to ' + PAYLOAD_ROOT);
+                console.log('No CsModular app found in /Applications. Run: pulvis-install /path/to/CsModular.app');
+                return;
+            }
+            for (const h of hosts) installTo(h);
+            return;
+        }
+        if (cmd === 'auto-uninstall') {
+            let hosts = [];
+            if (isFile(STATE_FILE)) {
+                try { hosts = JSON.parse(readText(STATE_FILE)); } catch (e) { hosts = []; }
+            }
+            for (const h of hosts) {
+                if (isDir(h)) uninstallFrom(h);
+            }
+            return;
+        }
+        if (cmd === 'install') {
+            if (argv.length < 2) throw new Error('Missing target CsModular path.');
+            installTo(resolveLibrariesDir(argv[1]));
+            return;
+        }
+        if (cmd === 'uninstall') {
+            if (argv.length < 2) throw new Error('Missing target CsModular path.');
+            uninstallFrom(resolveLibrariesDir(argv[1]));
+            return;
+        }
+        installTo(resolveLibrariesDir(cmd));
+    } catch (err) {
+        console.log('pulvis-install error: ' + err.message);
+        $.exit(1);
+    }
+}

@@ -2,21 +2,43 @@
 
 This page describes how Pulvis installers and the source archive are built, checked and cleaned up.
 
+## Source-checkout installation
+
+The [0.0.5 source archive](https://github.com/NJyutong/csmodular-pulvis/releases/download/v0.0.5/Pulvis-0.0.5-source.zip) includes the module generator and host integration patches. In the plugin checkout run:
+
+```sh
+node scripts/build-modules.mjs
+node scripts/install.mjs <path-to-compatible-csmodular-host>
+```
+
+For a locally maintained host with the audio engine, generator and panel integration already applied, the installer also accepts `--sync-assets` after the host path. It checks those integration files before refreshing the library, manuals, example and shared core.
+
 ## Local builds
 
 Run commands from the repository root:
 
 ```powershell
-npm run build:windows-installer
+npm run build:windows-x64         # Windows x64 installer
+npm run build:windows-arm64       # Windows ARM64 installer
+npm run build:windows-installer   # builds both x64 and ARM64 installers
 npm run release:checksums
 ```
 
 ```sh
+# macOS (built-in pkgbuild + productbuild, no WebView/Tauri/Rust required)
+npm run build:macos-arm64    # Apple Silicon (hostArchitectures="arm64")
+npm run build:macos-x64      # Intel (hostArchitectures="x86_64")
+# or build both .pkg installers in one run:
+npm run build:macos-all
+```
+
+```sh
+# Linux (standard dpkg-deb, no WebView/GTK/WebKit/Rust required)
 npm run build:linux-deb
 npm run release:checksums
 ```
 
-The Windows command requires Inno Setup 7.1.1. The Debian command must run on Linux and requires the Tauri system build dependencies listed in the workflow. The source archive is built from a committed revision with:
+The Windows commands require Inno Setup 7.1.1 and build separate native installers for Windows x64 (`ArchitecturesAllowed=x64os`) and Windows ARM64 (`ArchitecturesAllowed=arm64`). The macOS commands run on macOS (or GitHub Actions `macos-14`) using Apple's built-in `pkgbuild` and `productbuild` tools to produce native `.pkg` installers with no WebView or Rust runtime. The Debian command runs on Linux using `dpkg-deb` directly with no GTK, WebKit, or Tauri dependencies. The source archive is built from a committed revision with:
 
 ```sh
 node scripts/package-source.mjs <commit> release-assets/0.0.5
@@ -25,10 +47,13 @@ node scripts/package-source.mjs <commit> release-assets/0.0.5
 By default, verified packages are written to `release-assets/<version>/`:
 
 - `Pulvis-<version>-windows-x64.exe`
+- `Pulvis-<version>-windows-arm64.exe`
+- `Pulvis-<version>-macos-arm64.pkg` (Apple Silicon)
+- `Pulvis-<version>-macos-x64.pkg` (Intel)
 - `Pulvis-<version>-linux-x64.deb`
 - `Pulvis-<version>-source.zip`
 - A matching `<filename>.sha256` file for each package
-- `SHA256SUMS.txt`, generated after all three package files and sidecars are present
+- `SHA256SUMS.txt`, generated after all six package files and sidecars are present
 
 The Windows and Debian builders use a unique run directory under `D:\csmodular-tools\pulvis-builds`. WSL uses `/mnt/d/csmodular-tools/pulvis-builds`; native Linux uses the system temporary directory. The Debian build keeps its Cargo target and temporary Tauri CLI installation inside that run directory. The source packager writes its Git archive there as well.
 

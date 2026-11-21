@@ -8,7 +8,10 @@
 
 <p align="center">
   Version 0.0.5 ·
-  <a href="https://github.com/NJyutong/csmodular-pulvis/releases/download/v0.0.5/Pulvis-0.0.5-windows-x64.exe">Windows x64 Setup</a> ·
+  <a href="https://github.com/NJyutong/csmodular-pulvis/releases/download/v0.0.5/Pulvis-0.0.5-windows-x64.exe">Windows x64</a> ·
+  <a href="https://github.com/NJyutong/csmodular-pulvis/releases/download/v0.0.5/Pulvis-0.0.5-windows-arm64.exe">Windows ARM64</a> ·
+  <a href="https://github.com/NJyutong/csmodular-pulvis/releases/download/v0.0.5/Pulvis-0.0.5-macos-arm64.pkg">macOS (Apple Silicon)</a> ·
+  <a href="https://github.com/NJyutong/csmodular-pulvis/releases/download/v0.0.5/Pulvis-0.0.5-macos-x64.pkg">macOS (Intel)</a> ·
   <a href="https://github.com/NJyutong/csmodular-pulvis/releases/download/v0.0.5/Pulvis-0.0.5-linux-x64.deb">Linux x64 (.deb)</a> ·
   <a href="https://github.com/NJyutong/csmodular-pulvis/releases/download/v0.0.5/Pulvis-0.0.5-source.zip">Source ZIP</a> ·
   <a href="https://github.com/NJyutong/csmodular-pulvis/releases/download/v0.0.5/SHA256SUMS.txt">SHA-256</a>
@@ -24,31 +27,41 @@
 
 All three modules share an original 64-voice Csound granular engine with live oscilloscope and frequency spectrum displays, per-parameter CV modulation inputs, and three interface languages (English, Simplified Chinese, and Russian).
 
+During playback, Grain Osc shows its carrier and output waveform, Grain Freeze shows its recording or captured snapshot, and Grain Sample shows the selected WAV. The moving dots show where active grains are reading and how far they have travelled along the window curve.
+
 ## Installation
 
 > Install the **CsModular 0.1.5** host first, and close CsModular before installing Pulvis.
 
-### Windows (x64)
+### Windows (x64 & ARM64)
 
-1. Download [Pulvis-0.0.5-windows-x64.exe](https://github.com/NJyutong/csmodular-pulvis/releases/download/v0.0.5/Pulvis-0.0.5-windows-x64.exe) (verify with [SHA256SUMS.txt](https://github.com/NJyutong/csmodular-pulvis/releases/download/v0.0.5/SHA256SUMS.txt)).
+1. Download the setup wizard for your PC (verify with [SHA256SUMS.txt](https://github.com/NJyutong/csmodular-pulvis/releases/download/v0.0.5/SHA256SUMS.txt)):
+   - **Windows x64 (Intel / AMD):** [Pulvis-0.0.5-windows-x64.exe](https://github.com/NJyutong/csmodular-pulvis/releases/download/v0.0.5/Pulvis-0.0.5-windows-x64.exe)
+   - **Windows ARM64:** [Pulvis-0.0.5-windows-arm64.exe](https://github.com/NJyutong/csmodular-pulvis/releases/download/v0.0.5/Pulvis-0.0.5-windows-arm64.exe)
 2. Run the setup wizard and select your CsModular `libraries/pulvis` folder.
 3. Open CsModular — **Pulvis** automatically appears in the module list.
 4. **Uninstall:** Use Windows *Installed apps*, or run `unins000.exe` inside the plugin folder.
 
+### macOS (Apple Silicon & Intel)
+
+1. Download the native `.pkg` installer for your Mac:
+   - **Apple Silicon (M1 / M2 / M3 / M4):** [Pulvis-0.0.5-macos-arm64.pkg](https://github.com/NJyutong/csmodular-pulvis/releases/download/v0.0.5/Pulvis-0.0.5-macos-arm64.pkg)
+   - **Intel Mac:** [Pulvis-0.0.5-macos-x64.pkg](https://github.com/NJyutong/csmodular-pulvis/releases/download/v0.0.5/Pulvis-0.0.5-macos-x64.pkg)
+2. Double-click the `.pkg` (or right-click → **Open** on first run) and complete the standard macOS Installer wizard. If CsModular is installed in `/Applications/CsModular.app`, Pulvis is registered automatically.
+   - If CsModular is in a custom folder, run `pulvis-install /path/to/CsModular.app` in Terminal.
+3. Open CsModular — **Pulvis** automatically appears in the module list.
+4. **Uninstall:** Run `pulvis-install auto-uninstall` (or `pulvis-install uninstall /path/to/CsModular.app`).
+
 ### Linux (x64 Debian / Ubuntu)
 
-1. Download [Pulvis-0.0.5-linux-x64.deb](https://github.com/NJyutong/csmodular-pulvis/releases/download/v0.0.5/Pulvis-0.0.5-linux-x64.deb).
-2. Install the installer app:
+1. Download [Pulvis-0.0.5-linux-x64.deb](https://github.com/NJyutong/csmodular-pulvis/releases/download/v0.0.5/Pulvis-0.0.5-linux-x64.deb) (standard native Debian package — no WebView, GTK, or WebKit dependencies).
+2. Install with `apt`:
    ```sh
    sudo apt install ./Pulvis-0.0.5-linux-x64.deb
    ```
-3. Launch **Pulvis Installer** from your applications menu and select your CsModular `libraries` folder.
-4. Open CsModular — **Pulvis** automatically appears in the module list.
-5. **Uninstall:** First remove the plugin inside **Pulvis Installer**, then run `sudo apt remove pulvis-installer`.
-
-### macOS
-
-Native macOS installers are not yet available.
+   System CsModular installations are detected and registered automatically. For a custom CsModular path, run `pulvis-install /path/to/csmodular/libraries`.
+3. Open CsModular — **Pulvis** automatically appears in the module list.
+4. **Uninstall:** Run `sudo apt remove pulvis` (automatically removes Pulvis from registered host folders).
 
 *Upgrading from an older `granular` install:* The installer automatically migrates the folder to `pulvis`, and existing patches referencing `granular` continue to load seamlessly.
 
@@ -57,18 +70,21 @@ Native macOS installers are not yet available.
 1. Open **CsModular**. Press `Space` (or right-click empty canvas) to open the module browser — **Pulvis** is automatically listed with `Pulvis Grain Freeze`, `Pulvis Grain Sample`, and `Pulvis Grain Osc`.
 2. **Instant sound:** Add **Pulvis Grain Osc** and connect its `L` / `R` outputs to **Outs2** `L` / `R`. Lower the output volume and press **▶** to play.
 3. **Demo patch:** Load `pulvis-demo.json` (in CsModular's `patches` folder) to explore **Grain Osc → Grain Freeze → Outs2** alongside a ready-to-load **Grain Sample**.
-4. **Freezing live audio (Grain Freeze):** Connect any audio source to `Audio in`, let it record, switch `Freeze` from **Record** to **Freeze**, then click **Capture** and switch `Source` to **Snapshot** to keep that texture while the live buffer records new audio.
+4. **Freezing live audio (Grain Freeze):** Connect any audio source to `Audio in`, let it record, switch `Freeze` from **Record** to **Freeze**, then click **Capture** and switch `Source` to **Snapshot** to play the captured texture. Switch back to **Record** to resume recording while the snapshot plays.
 5. **Using your own WAV files (Grain Sample):** Choose a slot (`#1`–`#8` on the display or the `Slot` knob), click the **Open WAV…** button on an empty slot (or right-click the module → **Load WAV → slot…**), and connect `L` / `R` to **Outs2**.
 
 ### Panel Menu (Right-Click Title Bar)
 
+- Right-click the module title and choose **Show left-channel spectrum**. Choose **Show source** to return to the oscillator waveform, the Freeze recording or snapshot, or the selected WAV. This changes only that module’s display.
 - **Language:** Switch all Pulvis panels and module menus between **English**, **简体中文**, **Русский**, or **System default** (saved on your device). The main CsModular module browser stays in English to match the host UI.
 - **Panel color:** Tint any Pulvis module with 32 color presets, or click **↺ Follow theme** to restore the default matte graphite look.
 - **About:** View Pulvis version, website, copyright, and MIT license.
 
+If your module menu lacks the spectrum command, check that your CsModular host includes the updated Pulvis panels. The published 0.0.5 desktop installers predate this menu change.
+
 ## Controls
 
-Small jacks beside knobs and selectors accept additive control-rate CV modulation. All modules work in both Voice and FX layers (keep connected cables within the same layer).
+Small jacks beside knobs and selectors accept additive control-rate CV modulation. All modules work in both Voice and FX layers (keep connected cables within the same layer). Double-click a knob to restore its default. Hold **Shift** while dragging for fine adjustment.
 
 | Control | Range / Function | CV = 1 adds |
 |---|---|---|
@@ -95,23 +111,12 @@ Small jacks beside knobs and selectors accept additive control-rate CV modulatio
 
 ## WAV Support & Good to Know
 
+- If the display moves but you hear nothing, start playback, enable **Outs2**, and follow the cables to its left and right inputs. Each connected channel plays independently. For Grain Sample, select a slot containing a WAV. For a Freeze snapshot, record some input and press **Capture** first.
 - **Supported WAV formats:** 8–192 kHz, mono or stereo (stereo uses the left channel), PCM 8/16/24/32-bit, IEEE float 32/64-bit, and standard `WAVE_FORMAT_EXTENSIBLE`. RF64 and big-endian RIFX are not supported.
 - **Limits:** Up to **256 MiB** and **5 minutes** per file; up to **512 MiB** of source files and **48,000,000** decoded mono frames per session.
-- **Session data:** Imported WAVs are shared across Grain Sample instances during the current session and survive Stop/Start and recompile, but are **not** embedded in patch JSON files — re-import your WAV files after closing or reloading CsModular. No demo WAV is bundled; empty slots are silent.
-- **Replacing samples & snapshots:** Loading a new WAV into a slot briefly restarts audio (clearing live Freeze buffers). Freeze snapshots are private to each Freeze module and reset on restart or recompile.
+- **Session data:** Imported WAVs are shared across Grain Sample instances during the current session and survive Stop/Start, but are **not** embedded in patch JSON files — re-import your WAV files after closing or reloading CsModular. No demo WAV is bundled; empty slots are silent.
+- **Replacing samples & snapshots:** Loading a new WAV into a slot briefly restarts audio (clearing live Freeze buffers). Freeze snapshots are private to each Freeze module and reset on an audio restart.
 - **CPU tip:** If playback crackles on heavy patches, reduce **Grains/s**, **Size ms**, or the number of active granular modules.
-
-## For Developers
-
-If you are building from a CsModular source checkout instead of using the desktop installer, download the [Source ZIP](https://github.com/NJyutong/csmodular-pulvis/releases/download/v0.0.5/Pulvis-0.0.5-source.zip) or clone this repository and run:
-
-```sh
-node scripts/build-modules.mjs
-node scripts/install.mjs <path-to-csmodular-main>
-```
-
-Technical guides:
-- [Host integration](docs/INTEGRATION.md) · [Project structure](docs/PROJECT_STRUCTURE.md) · [Build & cleanup](docs/BUILDING.md) · [Testing](docs/TESTING.md) · [Provenance & sources](SOURCES.md)
 
 ## License
 

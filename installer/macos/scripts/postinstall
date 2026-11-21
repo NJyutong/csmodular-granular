@@ -1,0 +1,12 @@
+#!/bin/sh
+set -e
+
+MANAGE="/Library/Application Support/Pulvis/pulvis-manage"
+chmod 755 "$MANAGE"
+
+if [ -d /usr/local/bin ] || mkdir -p /usr/local/bin 2>/dev/null; then
+    ln -sf "$MANAGE" /usr/local/bin/pulvis-install
+fi
+
+"$MANAGE" auto-install || true
+exit 0

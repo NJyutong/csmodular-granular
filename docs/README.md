@@ -8,7 +8,7 @@ The root manuals explain setup and module controls in English, Simplified Chines
 
 Technical guides:
 
-- [Host integration](INTEGRATION.md) — module loading, audio routing, sample import, and installation.
+- [Host integration](INTEGRATION.md) — module loading, live display data, audio routing, sample import, and installation.
 - [Build and cleanup](BUILDING.md) — Windows/Linux package steps, output checksums, logs and temporary-file cleanup.
 - [Testing](TESTING.md) — quick regressions and complete host acceptance.
 - [GitHub setup](GITHUB-SETUP.md) — account, repository, About, topics, Actions and release fields.

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<installer-gui-script minSpecVersion="2">
+    <title>Pulvis __APP_VERSION__ (__ARCH_LABEL__)</title>
+    <organization>com.csmodular.pulvis</organization>
+    <domains enable_localSystem="true"/>
+    <options customize="never" require-scripts="false" rootVolumeOnly="true" hostArchitectures="__HOST_ARCH__"/>
+    <welcome file="welcome.html" mime-type="text/html"/>
+    <license file="LICENSE" mime-type="text/plain"/>
+    <conclusion file="conclusion.html" mime-type="text/html"/>
+    <pkg-ref id="com.csmodular.pulvis.pkg"/>
+    <choices-outline>
+        <line choice="default">
+            <line choice="com.csmodular.pulvis.pkg"/>
+        </line>
+    </choices-outline>
+    <choice id="default"/>
+    <choice id="com.csmodular.pulvis.pkg" visible="false">
+        <pkg-ref id="com.csmodular.pulvis.pkg"/>
+    </choice>
+    <pkg-ref id="com.csmodular.pulvis.pkg" version="__APP_VERSION__" onConclusion="none">pulvis-component.pkg</pkg-ref>
+</installer-gui-script>

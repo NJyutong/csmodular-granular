@@ -35,7 +35,8 @@
     "longDescription": "Install or update Pulvis in the CsModular host library folder.",
     "copyright": "Copyright © 2026 Zhang Shengwei",
     "macOS": {
-      "minimumSystemVersion": "11.0"
+      "minimumSystemVersion": "11.0",
+      "signingIdentity": "-"
     }
   }
 }

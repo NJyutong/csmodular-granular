@@ -20,6 +20,10 @@ Set both `CSMODULAR_HOST_ROOT` and `CSMODULAR_UI_HOST_ROOT` to isolated CsModula
 
 The full run covers host compatibility, module contracts, browser workflows, WAV import and persistence, spectral and performance regressions, Csound WASM output, production builds and desktop package source checks. Interactive runtime checks launch from the CsModular host itself (`npm run dev` or `node dev-server.mjs` in `csmodular-main`).
 
+## Live display and output routing
+
+With a host running, execute `node tests/pulvis-display-routing.mjs http://127.0.0.1:4177/` from the plugin checkout. It measures both final output channels during playback, after unplugging Outs2, after reconnecting one channel, and with the output module removed. It also checks oscillator pitch against the FFT, known WAV peak values, freeze capture and the module’s right-click display commands.
+
 ## Package smoke
 
 ```sh

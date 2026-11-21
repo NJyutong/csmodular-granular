@@ -1,15 +1,62 @@
 # Provenance and license decisions
 
-Reviewed on 2026-11-12. Provenance decisions below are based on inspected reference snapshots and their documented licenses. File paths and SHA-256 hashes in reference-files.json are relative to each reference project. No source code or audio assets were copied or translated.
+## Pulvis application icon (2026-11-19)
+
+The user supplied `深色粒子波纹应用图标.webp` from the local Downloads folder for
+the 0.0.5 product icon. The original WebP is retained at
+`assets/pulvis-source.webp`. The repository's `scripts/build-icons.py` uses the
+pinned Pillow 12.3.0 release tool in `requirements-release.txt` to derive the
+512 px PNG used by the README, installer interface, and Linux bundle, plus the
+Windows ICO and macOS ICNS bundles. Regenerate with
+`python -m pip install -r requirements-release.txt` followed by
+`python scripts/build-icons.py`. The installer workflows reference only the
+generated repository assets; no external image is fetched.
+The user supplied the image directly, and no separate third-party license is
+asserted for it.
+
+Reviewed on 2026-11-12. Reference trees were supplied locally; nothing was cloned,
+downloaded into them, modified or redistributed. `references/granular/` was
+absent, but all four alternative directories supplied by the user existed.
+These extracted trees do not establish upstream Git revisions; exact file
+SHA-256 values are recorded in `reference-files.json` in the standalone plugin.
+
+## P2 desktop installer integration (2026-11-19)
+
+The cross-platform Tauri installer UI, icons, Rust package, and build workflow were
+integrated from the local `csmodular-granular-upload-stage` repository at commit
+`c6e003d`. That repository declares MIT in its root `LICENSE` and lists Zhang
+Shengwei as the Cargo package author. Its MIT attribution is retained here. The
+installer bundles the original granular files from this repository; it does not
+bundle the CsModular host or any third-party DSP source. Dependencies remain
+external Cargo/npm packages with their own license terms. The host patch remains
+the P1-accepted formal-repository version because it passed the isolated-host P0/P1
+checks; broader staging-only context-menu and color-picker changes were not copied.
+
+## Studio UI & host integration updates (2026-11-20)
+
+Original matte graphite widescreen (`500 × 300`) canvas panel rendering (`src/ui/PulvisPanel.js`),
+read-only rendering of Csound source, grain activity, oscilloscope and left-output FFT tables (`giScope_*` / `giSpectrum_*`),
+HiDPI canvas alignment (`main.js`), rounded Pulvis language menu (`src/ui/module-menu.css`),
+and HSL/RGB/hex panel color tinting with theme reset (`src/ui/ModuleContextMenu.js`) were
+authored directly for the Pulvis host integration patch (`integration/csmodular.patch`).
+No third-party UI assets, fonts, audio files, or demo WAV files are bundled.
 
 ## Host
 
-The supplied host baseline is CsModular 0.1.5. Its README declares MIT but refers to a LICENSE file absent from the supplied source tree. The granular plugin's LICENSE covers original additions; it does not replace the host's missing notice or the license context of lines in the integration patch.
+`E:/paper/csmodular-main` reports version 0.1.5. Its README says MIT and refers
+to `LICENSE`, but that file was absent in the supplied tree. The original tree
+was recorded in local Git commit `10136ca` before implementation. No substitute
+upstream copyright notice was invented. The plugin LICENSE covers original
+granular additions, not the host or context lines in the integration patch.
 
-The runtime uses @csound/browser 7.0.0-beta33; this supersedes an outdated 6.18.7 comment in the host. The test-only pinned npm package carries its own Apache-2.0 LICENSE and THIRD_PARTY notices. Csound and bundled dependencies retain their own terms. No dependency binaries are committed or copied into the plugin distribution.
+The actual runtime constant is `@csound/browser@7.0.0-beta33`, overriding an old
+6.18.7 comment. The test-only pinned npm package has its own Apache-2.0 LICENSE
+and THIRD_PARTY notices; Csound and bundled dependencies keep their own terms.
+No dependency binaries are committed or copied into the plugin distribution.
+
 ## QB Nebulae V2
 
-- Inspected reference file: `QB_Nebulae_V2-master/Instruments/Granular Looper/a_granular_looper.instr`.
+- Local: `E:/paper/QB_Nebulae_V2-master/Instruments/Granular Looper/a_granular_looper.instr`.
 - Upstream: [Qu-Bit Electronix QB_Nebulae_V2](https://github.com/Qu-Bit-Electronix/QB_Nebulae_V2).
 - Header: Stephen Hensley / Qu-bit Electronix, 2017. No explicit license grant
   was found in the relevant file or a root LICENSE/COPYING file.
@@ -25,7 +72,7 @@ The runtime uses @csound/browser 7.0.0-beta33; this supersedes an outdated 6.18.
 
 ## Mutable Instruments Clouds
 
-- Inspected reference file: `eurorack-master/clouds/dsp/`.
+- Local: `E:/paper/eurorack-master/clouds/dsp/`.
 - Upstream: [pichenettes/eurorack](https://github.com/pichenettes/eurorack).
 - Inspected `granular_processor.cc`, `granular_sample_player.h`, `grain.h`,
   and `audio_buffer.h`. Their file headers carry Emilie Gillet, 2014, and an
@@ -45,7 +92,7 @@ The runtime uses @csound/browser 7.0.0-beta33; this supersedes an outdated 6.18.
 
 ## Csound FLOSS manual
 
-- Inspected reference file: `csound-floss-develop/book/`.
+- Local: `E:/paper/csound-floss-develop/book/`.
 - Upstream: [csound-flossmanual/csound-floss](https://github.com/csound-flossmanual/csound-floss).
 - Read `04-f-granular-synthesis.md`, specifically `04F02_GranSynth_basic.csd`
   (`schedkwhen` → separate grain instrument), and the self-made granulator
@@ -61,7 +108,7 @@ The runtime uses @csound/browser 7.0.0-beta33; this supersedes an outdated 6.18.
 
 ## B.Harvestr
 
-- Inspected reference file: `BHarvestr-master/src/Grain.hpp` and `Voice.hpp`.
+- Local: `E:/paper/BHarvestr-master/src/Grain.hpp` and `Voice.hpp`.
 - Upstream: [sjaehn/BHarvestr](https://github.com/sjaehn/BHarvestr).
 - Both headers declare Sven Jähnichen, 2018, **GPL-3.0-or-later**. Licenses of
   bundled UI libraries are not evidence for relicensing its DSP files.
@@ -78,7 +125,9 @@ not extracted from any reference source. The tests create small synthetic
 signals; no third-party sample material ships with the library.
 
 Generic opcode behavior was checked against the official manual and, more
-importantly, actually compiled/rendered using the exact production WASM build:
+importantly, actually compiled/rendered using the exact production WASM build.
+`setksmps 1` is used only by the test-only per-sample reference engine and an
+isolated opcode probe; the production block renderer does not use it:
 [setksmps](https://csound.com/docs/manual/setksmps.html),
 [xout](https://csound.com/docs/manual/xout.html),
 [ftgentmp](https://csound.com/docs/manual/ftgentmp.html), and

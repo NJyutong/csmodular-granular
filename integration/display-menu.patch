@@ -1,0 +1,61 @@
+diff --git a/src/ui/ModuleContextMenu.js b/src/ui/ModuleContextMenu.js
+index ad002e2..dde3b70 100644
+--- a/src/ui/ModuleContextMenu.js
++++ b/src/ui/ModuleContextMenu.js
+@@ -122,7 +122,15 @@ export class ModuleContextMenu {
+       this.menuElement.querySelector('.pulvis-language select').focus();
+     };
+     label.append(select);
+-    this.menuElement.append(about, label);
++    const panel = this.currentModule;
++    const viewLabel = panel.pulvisFft
++        ? { en: 'Show source', zh: '显示音源', ru: 'Показать источник' }
++        : { en: 'Show left-channel spectrum', zh: '显示左声道频谱', ru: 'Показать спектр левого канала' };
++    const view = this.createMenuItem(this.t(viewLabel), () => {
++      panel.pulvisFft = !panel.pulvisFft;
++      panel.setDirty(true);
++    });
++    this.menuElement.append(about, label, view);
+   }
+ 
+   updateMenuContent() {
+diff --git a/src/ui/PulvisPanel.js b/src/ui/PulvisPanel.js
+index 101faf8..99861b2 100644
+--- a/src/ui/PulvisPanel.js
++++ b/src/ui/PulvisPanel.js
+@@ -402,18 +402,7 @@ function drawPulvisStudioChassisAndOled(panel, ctx, palette) {
+     ctx.textBaseline = 'middle';
+     ctx.fillText(panel.title, px + 26, py + 15, w - 40);
+ 
+-    // Header buttons leave the original full width of both OLED panes available.
+     const fft = Boolean(panel.pulvisFft);
+-    for (const [i, label] of [tr('Source', '音源', 'Источник'), 'FFT · L'].entries()) {
+-        const bx = px + w - 112 + i * 51;
+-        const selected = i === Number(fft);
+-        ctx.fillStyle = selected ? hexToRgba(palette.accent, 0.22) : palette.oledBg;
+-        fillRoundedPath(ctx, bx, py + 7, 49, 16, 3);
+-        ctx.fillStyle = selected ? palette.accentSoft : palette.mutedText;
+-        ctx.font = `600 9px ${UI_FONT}`;
+-        ctx.textAlign = 'center';
+-        ctx.fillText(label, bx + 24.5, py + 15, 45);
+-    }
+ 
+     // 3. Recessed Full-Width OLED Display (x = 10..490, y = 32..90)
+     const ox = px + 10;
+@@ -966,16 +955,6 @@ const drawControl = { Knob: drawKnob, TextLabel: drawTextLabel, ButtonIncDec: dr
+ 
+ function handleDisplay(panel, x, y) {
+     const relX = x - panel.pixelX, relY = y - panel.pixelY;
+-    if (relY >= 7 && relY <= 23) {
+-        for (const i of [0, 1]) {
+-            const left = panel.width - 112 + 51 * i;
+-            if (relX >= left && relX <= left + 49) {
+-                panel.pulvisFft = Boolean(i);
+-                panel.setDirty(true);
+-                return { type: 'component-drag', endDrag() {} };
+-            }
+-        }
+-    }
+     if (panel.parentSystem.locked) return null;
+     if (relX < 10 || relX > 490 || relY < 32 || relY > 90) return null;
+     const controls = panel.pulvisControls;

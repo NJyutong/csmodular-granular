@@ -10,6 +10,9 @@ const version = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8')
 const outputDirectory = resolve(process.argv[2] || resolve(root, 'release-assets', version));
 const packageNames = [
     `Pulvis-${version}-windows-x64.exe`,
+    `Pulvis-${version}-windows-arm64.exe`,
+    `Pulvis-${version}-macos-arm64.pkg`,
+    `Pulvis-${version}-macos-x64.pkg`,
     `Pulvis-${version}-linux-x64.deb`,
     `Pulvis-${version}-source.zip`,
 ];
